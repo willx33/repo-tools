@@ -52,12 +52,43 @@ def parse_gitignore(repo_path: Path) -> pathspec.PathSpec:
     """
     patterns = []
     
-    # Add default ignored patterns
+    # Add default ignored patterns (even if not in .gitignore)
     patterns.extend([
+        # Git directories
         ".git/",
+        
+        # Node.js
+        "node_modules/",
+        "**/node_modules/**",
+        
+        # Python
         "**/__pycache__/",
         "**/*.py[cod]",
         "**/*$py.class",
+        "venv/",
+        "env/",
+        ".env/",
+        ".venv/",
+        
+        # Java/Maven/Gradle
+        "target/",
+        "build/",
+        
+        # Ruby
+        "vendor/bundle/",
+        
+        # PHP
+        "vendor/",
+        
+        # .NET
+        "bin/",
+        "obj/",
+        
+        # General dependency directories
+        "third_party/",
+        "third-party/",
+        "external/",
+        "deps/",
     ])
     
     # Find all .gitignore files
@@ -85,6 +116,37 @@ def should_exclude_file(file_path: str, rel_path: str) -> bool:
     Returns:
         True if the file should be excluded, False otherwise.
     """
+    # CRITICAL: Dependency directories to exclude completely (with trailing slash to ensure directory matching)
+    dependency_dirs = [
+        # Node.js
+        "node_modules/",
+        # Python
+        "venv/", "env/", ".env/", ".venv/", ".tox/", "site-packages/", "dist-packages/", "__pycache__/",
+        # Ruby
+        "vendor/bundle/", "vendor/ruby/", ".bundle/",
+        # Java/Maven/Gradle
+        "target/", "build/lib/", ".gradle/",
+        # PHP
+        "vendor/", "composer/",
+        # Go
+        "vendor/", "pkg/",
+        # Rust
+        "target/", "cargo/",
+        # Swift/iOS
+        "Pods/", "Carthage/",
+        # .NET
+        "bin/", "obj/", "packages/",
+        # General
+        "third_party/", "third-party/", "external/", "deps/", "lib/", "libs/"
+    ]
+    
+    # Check for dependency directories
+    rel_path_with_slash = f"{rel_path}/" if rel_path != "." else "/"
+    for dep_dir in dependency_dirs:
+        # If the dependency directory appears anywhere in the path
+        if dep_dir in rel_path_with_slash:
+            return True
+    
     # Common patterns to exclude
     excluded_patterns = [
         # Package management files
