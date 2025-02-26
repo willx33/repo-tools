@@ -116,6 +116,11 @@ def should_exclude_file(file_path: str, rel_path: str) -> bool:
     Returns:
         True if the file should be excluded, False otherwise.
     """
+    # Always include .env files regardless of location.
+    filename = os.path.basename(file_path)
+    if filename == ".env" or filename.startswith(".env."):
+        return False
+
     # CRITICAL: Dependency directories to exclude completely (with trailing slash to ensure directory matching)
     dependency_dirs = [
         # Node.js
@@ -180,9 +185,6 @@ def should_exclude_file(file_path: str, rel_path: str) -> bool:
         ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".pdf"
     ]
     
-    # Check filename
-    filename = os.path.basename(file_path)
-    
     # Check against excluded patterns
     for pattern in excluded_patterns:
         # If pattern ends with /, it's a directory pattern
@@ -202,9 +204,9 @@ def should_exclude_file(file_path: str, rel_path: str) -> bool:
     if file_ext in excluded_extensions:
         return True
     
-    # Special case for dot files (.env, .gitignore, etc.)
+    # Special case for dot files (.gitignore, etc.)
     if filename.startswith('.') and not (
-        # Make exceptions for source files with dot prefixes
+        filename == ".env" or filename.startswith(".env.") or
         filename.endswith('.js') or
         filename.endswith('.ts') or
         filename.endswith('.py') or
@@ -254,6 +256,10 @@ def should_include_file(file_path: str) -> bool:
     for name in important_filenames:
         if filename.startswith(name):
             return True
+
+    # Always include .env files regardless of extension
+    if filename == ".env" or filename.startswith(".env."):
+        return True
     
     # Include based on extension
     return file_ext in included_extensions
@@ -283,8 +289,9 @@ def get_relevant_files_with_content(repo_path: Path):
             rel_path = os.path.join(rel_root, file)
             abs_path = os.path.join(root, file)
             
-            # Skip files that match .gitignore patterns
-            if gitignore_spec.match_file(rel_path):
+            # Allow .env files (.env, .env.local, etc.) even if matched in .gitignore
+            is_env_file = file == ".env" or file.startswith(".env.")
+            if not is_env_file and gitignore_spec.match_file(rel_path):
                 ignored_files.append(Path(abs_path))
                 continue
             
