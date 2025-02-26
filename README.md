@@ -1,10 +1,10 @@
-# Repo Tools
+# AI Workflow
 
-A collection of tools to enhance git repository workflows.
+A collection of tools to streamline AI-assisted development workflows.
 
 ## Features
 
-- **Repo Code Context Copier**: Copies the entire content of a git repository (respecting .gitignore) to your clipboard with file paths included.
+- **Repo Code Context Copier**: Copies relevant code context from git repos to your clipboard for use with AI assistants.
 
 ## Installation
 
@@ -12,7 +12,7 @@ A collection of tools to enhance git repository workflows.
 ```bash
 # Clone the repository
 git clone [your-repo-url]
-cd repo-tools
+cd ai-workflow
 
 # Create and activate a virtual environment (optional but recommended)
 python -m venv venv
@@ -29,7 +29,7 @@ pip install -e .
 ```bash
 # Clone the repository
 git clone [your-repo-url]
-cd repo-tools
+cd ai-workflow
 
 # Create and activate a virtual environment (optional but recommended)
 python -m venv venv
@@ -51,7 +51,7 @@ Use arrow keys to navigate through the menu, and Enter to select an option.
 
 ### Repo Code Context Copier
 
-This module helps you copy the entire content of a git repository to your clipboard, excluding files specified in .gitignore.
+This tool helps you copy code context from a git repository to your clipboard, respecting .gitignore rules. Perfect for providing context to AI assistants.
 
 1. Select "Repo Code Context Copier" from the main menu
 2. Choose a directory path to scan for repositories (paths from current directory up to the root will be shown)
