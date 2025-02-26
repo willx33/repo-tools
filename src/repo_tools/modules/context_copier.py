@@ -40,25 +40,94 @@ def generate_path_options(start_path: Path) -> list:
     return path_options
 
 
-def display_file_summary(included_files, ignored_files):
+def display_file_summary(included_files, ignored_files, repo_path):
     """
     Display a summary of included and ignored files.
     
     Args:
         included_files: List of tuples (file_path, content) for included files
         ignored_files: List of file paths that were ignored
+        repo_path: Path to the repository root
     """
-    # Display included files
-    included_count = len(included_files)
-    console.print(f"\n[bold green]Including [/bold green][bold]{included_count}[/bold][bold green] files:[/bold green]")
+    # Group files by top-level directory (depth of 1)
+    included_by_dir = {}
+    ignored_by_dir = {}
+    repo_str = str(repo_path).rstrip(os.sep) + os.sep
     
-    # Show list of included files
+    # Process included files
+    for file_path, _ in included_files:
+        # Get the path relative to the repo root
+        rel_path = str(file_path)
+        if rel_path.startswith(repo_str):
+            rel_path = rel_path[len(repo_str):]
+        
+        # Get the top-level directory
+        parts = rel_path.split(os.sep)
+        if len(parts) > 1:
+            top_dir = parts[0]
+        else:
+            top_dir = "root"  # Files directly in repo root
+        
+        if top_dir not in included_by_dir:
+            included_by_dir[top_dir] = []
+        included_by_dir[top_dir].append(file_path)
+    
+    # Process ignored files
+    for file_path in ignored_files:
+        # Get the path relative to the repo root
+        rel_path = str(file_path)
+        if rel_path.startswith(repo_str):
+            rel_path = rel_path[len(repo_str):]
+        
+        # Get the top-level directory
+        parts = rel_path.split(os.sep)
+        if len(parts) > 1:
+            top_dir = parts[0]
+        else:
+            top_dir = "root"  # Files directly in repo root
+        
+        if top_dir not in ignored_by_dir:
+            ignored_by_dir[top_dir] = []
+        ignored_by_dir[top_dir].append(file_path)
+    
+    # Display included files first
+    console.print(f"\n[bold green]Files to be included:[/bold green]")
     for file_path, _ in included_files:
         console.print(f"  [green]✓[/green] {file_path}")
     
-    # Display ignored files count only
+    # Then show the total count
+    included_count = len(included_files)
+    console.print(f"[bold green]Total: {included_count} files included[/bold green]\n")
+    
+    # Display ignored files count
     ignored_count = len(ignored_files)
-    console.print(f"\n[bold yellow]Ignoring [/bold yellow][bold]{ignored_count}[/bold][bold yellow] files[/bold yellow]")
+    console.print(f"[bold yellow]Total: {ignored_count} files ignored[/bold yellow]\n")
+    
+    # Create summary by top-level directory
+    console.print("[bold blue]Summary by directory:[/bold blue]")
+    
+    # Get all unique top-level directories
+    all_dirs = set(list(included_by_dir.keys()) + list(ignored_by_dir.keys()))
+    
+    for directory in sorted(all_dirs):
+        included_count = len(included_by_dir.get(directory, []))
+        ignored_count = len(ignored_by_dir.get(directory, []))
+        
+        # Skip directories with no files
+        if included_count == 0 and ignored_count == 0:
+            continue
+        
+        display_dir = directory
+        if display_dir == "root":
+            display_dir = "(repo root)"
+            
+        # Create appropriate message based on what's included/excluded
+        if included_count > 0 and ignored_count > 0:
+            console.print(f"  [blue]•[/blue] {included_count} files included and {ignored_count} files ignored from [bold]{display_dir}/[/bold]")
+        elif included_count > 0:
+            console.print(f"  [green]•[/green] {included_count} files included from [bold]{display_dir}/[/bold]")
+        elif ignored_count > 0:
+            console.print(f"  [yellow]•[/yellow] {ignored_count} files ignored from [bold]{display_dir}/[/bold]")
 
 
 def repo_context_copier() -> None:
@@ -154,7 +223,7 @@ def repo_context_copier() -> None:
             progress.update(task, completed=True)
         
         # Display file summary
-        display_file_summary(files_with_content, ignored_files)
+        display_file_summary(files_with_content, ignored_files, selected_repo)
         
         # Ask what to do next with simpler options
         next_action_choices = [
