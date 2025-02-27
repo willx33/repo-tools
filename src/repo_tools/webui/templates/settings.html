@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Repo Tools{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Settings</h2>
+    <p>Customize your Repo Tools experience</p>
+</div>
+
+<div class="workflow-container">
+    <div class="workflow-step">
+        <h3>UI Preferences</h3>
+        
+        <div class="form-group">
+            <label for="matrix-toggle">Matrix Effect</label>
+            <div class="toggle-switch">
+                <input type="checkbox" id="matrix-toggle" class="toggle-input">
+                <label for="matrix-toggle" class="toggle-label"></label>
+                <span class="toggle-text">Enable the Matrix-style background effect</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const matrixToggle = document.getElementById('matrix-toggle');
+        
+        // Initialize toggle based on saved preference
+        const matrixEnabled = localStorage.getItem('matrixEffectEnabled') !== 'false';
+        matrixToggle.checked = matrixEnabled;
+        
+        // Toggle matrix effect when checkbox is changed
+        matrixToggle.addEventListener('change', function() {
+            window.toggleMatrixEffect(this.checked);
+        });
+    });
+</script>
+<style>
+    /* Toggle Switch Styles */
+    .toggle-switch {
+        display: flex;
+        align-items: center;
+        margin: 10px 0;
+    }
+    
+    .toggle-input {
+        display: none;
+    }
+    
+    .toggle-label {
+        position: relative;
+        display: inline-block;
+        width: 60px;
+        height: 34px;
+        background-color: var(--bg-tertiary);
+        border-radius: 34px;
+        transition: 0.4s;
+        cursor: pointer;
+        margin-right: 10px;
+    }
+    
+    .toggle-label:before {
+        content: "";
+        position: absolute;
+        height: 26px;
+        width: 26px;
+        left: 4px;
+        bottom: 4px;
+        background-color: var(--text-secondary);
+        border-radius: 50%;
+        transition: 0.4s;
+    }
+    
+    .toggle-input:checked + .toggle-label {
+        background-color: var(--accent-color);
+    }
+    
+    .toggle-input:checked + .toggle-label:before {
+        transform: translateX(26px);
+        background-color: white;
+    }
+    
+    .toggle-text {
+        color: var(--text-secondary);
+    }
+</style>
+{% endblock %}

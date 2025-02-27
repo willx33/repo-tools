@@ -21,6 +21,7 @@
                     <li><a href="/" {% if request.path == '/' %}class="active"{% endif %}>Home</a></li>
                     <li><a href="/local-repo" {% if request.path == '/local-repo' %}class="active"{% endif %}>Local Repository</a></li>
                     <li><a href="/github-repo" {% if request.path == '/github-repo' %}class="active"{% endif %}>GitHub Repository</a></li>
+                    <li><a href="/settings" {% if request.path == '/settings' %}class="active"{% endif %}>Settings</a></li>
                 </ul>
             </nav>
         </header>
@@ -38,9 +39,17 @@
     
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // Check local storage for matrix effect preference
+            const matrixEnabled = localStorage.getItem('matrixEffectEnabled') !== 'false';
+            
             // Matrix effect
             const canvas = document.getElementById('matrix-canvas');
             const ctx = canvas.getContext('2d');
+            
+            // Show/hide matrix effect based on preference
+            if (!matrixEnabled) {
+                canvas.style.display = 'none';
+            }
             
             // Set canvas dimensions to window size
             function resizeCanvas() {
@@ -59,7 +68,8 @@
                 columns: 0,
                 fallSpeed: 1, // Slightly faster
                 color: '#4caf50', // Full color without transparency for primary characters
-                dimColor: '#225a2490' // Dimmer color for trail characters
+                dimColor: '#225a2490', // Dimmer color for trail characters
+                animationId: null // To store animation frame ID
             };
             
             // Initialize drops array - with varied density
@@ -140,10 +150,33 @@
                     }
                 }
                 
-                requestAnimationFrame(draw);
+                if (matrixEnabled) {
+                    matrix.animationId = requestAnimationFrame(draw);
+                }
             }
             
-            draw();
+            // Start animation if enabled
+            if (matrixEnabled) {
+                draw();
+            }
+            
+            // Function to toggle matrix effect
+            window.toggleMatrixEffect = function(enabled) {
+                if (enabled) {
+                    canvas.style.display = 'block';
+                    if (!matrix.animationId) {
+                        draw();
+                    }
+                } else {
+                    canvas.style.display = 'none';
+                    if (matrix.animationId) {
+                        cancelAnimationFrame(matrix.animationId);
+                        matrix.animationId = null;
+                    }
+                }
+                
+                localStorage.setItem('matrixEffectEnabled', enabled);
+            };
         });
     </script>
 </body>

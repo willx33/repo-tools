@@ -26,6 +26,11 @@ def local_repo():
 def github_repo():
     """Render the GitHub repo context copier page."""
     return render_template('github_repo.html')
+    
+@app.route('/settings')
+def settings():
+    """Render the settings page."""
+    return render_template('settings.html')
 
 # API Routes
 @app.route('/api/paths')

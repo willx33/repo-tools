@@ -18,8 +18,16 @@ socketio = SocketIO(app)
 webui_thread = None
 webui_running = False
 
-def start_webui(debug=False, open_browser=True):
-    """Start the WebUI server in a background thread."""
+def start_webui(debug=False, open_browser=True, block=False):
+    """
+    Start the WebUI server in a background thread.
+    
+    Args:
+        debug: Whether to run the server in debug mode
+        open_browser: Whether to open the browser automatically
+        block: Whether to block and wait for the server to finish (CLI mode) or 
+               return control to the caller (background mode)
+    """
     global webui_thread, webui_running
     
     if webui_running:
@@ -42,6 +50,16 @@ def start_webui(debug=False, open_browser=True):
     # Open browser automatically if requested
     if open_browser:
         webbrowser.open(f"http://127.0.0.1:5000/")
+        
+    # If block is True, wait for the thread to complete (CLI mode)
+    if block:
+        try:
+            # Wait for the thread to complete or until interrupted
+            while webui_running and webui_thread.is_alive():
+                webui_thread.join(1)  # Check status every second
+        except KeyboardInterrupt:
+            console.print("[yellow]WebUI interrupted. Shutting down...[/yellow]")
+            stop_webui()
 
 def stop_webui():
     """Stop the WebUI server."""

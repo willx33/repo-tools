@@ -244,8 +244,13 @@ def display_file_summary(included_files, ignored_files):
             console.print(f"  [yellow]•[/yellow] {ignored_count} files ignored from [bold]{display_dir}/[/bold]")
 
 
-def github_repo_context_copier() -> None:
-    """Run the GitHub repo code context copier module."""
+def github_repo_context_copier() -> bool:
+    """
+    Run the GitHub repo code context copier module.
+    
+    Returns:
+        bool: True if context was successfully copied, False otherwise
+    """
     # Track selected repositories and their content
     selected_repos = []
     
@@ -261,12 +266,12 @@ def github_repo_context_copier() -> None:
         answers = inquirer.prompt(questions)
         
         if not answers:  # User pressed Ctrl+C
-            break
+            return False
             
         repo_url = answers["repo_url"].strip()
         
         if repo_url.lower() == 'back':
-            break
+            return False
         
         # Extract GitHub repository URL
         clean_url = extract_github_repo_url(repo_url)
@@ -314,7 +319,7 @@ def github_repo_context_copier() -> None:
         answers = inquirer.prompt(questions)
         
         if not answers:  # User pressed Ctrl+C
-            break
+            return False
             
         next_action = answers["next_action"]
         
@@ -323,11 +328,11 @@ def github_repo_context_copier() -> None:
         console.print(f"[bold green]Added '{repo_name}' to selection[/bold green]")
         
         if next_action == "back":
-            break
+            return False
         elif next_action == "copy":
             # Copy all selected repos
-            copy_selected_repositories(selected_repos)
-            break
+            success = copy_selected_repositories(selected_repos)
+            return success
         elif next_action == "refresh":
             # Refresh the current repository files - this will re-fetch the latest content
             console.print(f"[bold blue]Refreshing repository files...[/bold blue]")
@@ -376,16 +381,19 @@ def github_repo_context_copier() -> None:
             pass
 
 
-def copy_selected_repositories(selected_repos):
+def copy_selected_repositories(selected_repos) -> bool:
     """
     Copy content from all selected repositories to clipboard.
     
     Args:
         selected_repos: List of tuples (repo_name, repo_url, files_with_content, ignored_files)
+        
+    Returns:
+        bool: True if content was copied successfully, False otherwise
     """
     if not selected_repos:
         console.print("[bold yellow]No repositories selected to copy.[/bold yellow]")
-        return
+        return False
     
     # Format content for clipboard with clear separation between repositories
     formatted_content = ""
@@ -420,3 +428,5 @@ def copy_selected_repositories(selected_repos):
         title="Copy Complete",
         border_style="green"
     ))
+    
+    return True

@@ -62,15 +62,18 @@ def display_main_menu() -> None:
             
             if module == "context_copier":
                 console.print("[bold green]Local Repo Code Context Copier[/bold green]")
-                repo_context_copier()
-                console.print("[green]Local repo context copied successfully![/green]")
+                success = repo_context_copier()
+                if success:
+                    console.print("[green]Local repo context copied successfully![/green]")
             elif module == "github_context_copier":
                 console.print("[bold green]GitHub Repo Code Context Copier[/bold green]")
-                github_repo_context_copier()
-                console.print("[green]GitHub repo context copied successfully![/green]")
+                success = github_repo_context_copier()
+                if success:
+                    console.print("[green]GitHub repo context copied successfully![/green]")
             elif module == "webui":
                 console.print("[bold green]Starting WebUI...[/bold green]")
-                start_webui(debug=False, open_browser=True)
+                # Start WebUI in background mode (non-blocking)
+                start_webui(debug=False, open_browser=True, block=False)
                 console.print(f"[green]WebUI is running at http://127.0.0.1:5000/[/green]")
                 console.print("[cyan]The WebUI will remain active until you exit the program.[/cyan]")
                 console.print("[cyan]You can continue using the CLI while the WebUI is running.[/cyan]")

@@ -130,8 +130,13 @@ def display_file_summary(included_files, ignored_files, repo_path):
             console.print(f"  [yellow]•[/yellow] {ignored_count} files ignored from [bold]{display_dir}/[/bold]")
 
 
-def repo_context_copier() -> None:
-    """Run the repo code context copier module."""
+def repo_context_copier() -> bool:
+    """
+    Run the repo code context copier module.
+    
+    Returns:
+        bool: True if context was successfully copied, False otherwise
+    """
     # Get current directory
     current_dir = Path.cwd()
     
@@ -155,7 +160,7 @@ def repo_context_copier() -> None:
     answers = inquirer.prompt(questions)
     
     if not answers or answers["path"] is None:  # User canceled or chose to go back
-        return
+        return False
     
     selected_path = answers["path"]
     
@@ -167,15 +172,15 @@ def repo_context_copier() -> None:
         # Validate the path
         if not custom_path:
             console.print("[yellow]No path entered. Returning to main menu.[/yellow]")
-            return
+            return False
         
         path_obj = Path(custom_path)
         if not path_obj.exists():
             console.print(f"[red]Error: Path '{custom_path}' does not exist.[/red]")
-            return
+            return False
         if not path_obj.is_dir():
             console.print(f"[red]Error: Path '{custom_path}' is not a directory.[/red]")
-            return
+            return False
         
         selected_path = path_obj
     console.print(f"[bold blue]Searching for repositories in:[/bold blue] {selected_path}")
@@ -188,7 +193,7 @@ def repo_context_copier() -> None:
     
     if not repos:
         console.print("[bold yellow]No git repositories found![/bold yellow]")
-        return
+        return False
     
     # Track selected repositories and their content
     selected_repos = []
@@ -226,17 +231,17 @@ def repo_context_copier() -> None:
         answers = inquirer.prompt(questions)
         
         if not answers:  # User pressed Ctrl+C
-            break
+            return False
             
         selected_repo = answers["repo"]
         
         if selected_repo is None:  # Back to main menu
-            break
+            return False
             
         if selected_repo == "copy":  # Copy all selected repos
             # Process the copy operation
             copy_selected_repositories(selected_repos)
-            break
+            return True
         
         # Get all relevant files with content and ignored files
         with Progress() as progress:
@@ -274,7 +279,7 @@ def repo_context_copier() -> None:
         answers = inquirer.prompt(questions)
         
         if not answers:  # User pressed Ctrl+C
-            break
+            return False
             
         next_action = answers["next_action"]
         
@@ -284,11 +289,11 @@ def repo_context_copier() -> None:
         console.print(f"[bold green]Added '{repo_name}' to selection[/bold green]")
         
         if next_action == "back":
-            break
+            return False
         elif next_action == "copy":
             # Copy all selected repos
             copy_selected_repositories(selected_repos)
-            break
+            return True
         elif next_action == "refresh":
             # Refresh the current repository files
             console.print(f"[bold blue]Refreshing repository files...[/bold blue]")
@@ -318,16 +323,19 @@ def repo_context_copier() -> None:
         # For "add", just continue the loop to select more repos
 
 
-def copy_selected_repositories(selected_repos):
+def copy_selected_repositories(selected_repos) -> bool:
     """
     Copy content from all selected repositories to clipboard.
     
     Args:
         selected_repos: List of tuples (repo_path, files_with_content, ignored_files)
+        
+    Returns:
+        bool: True if content was copied successfully, False otherwise
     """
     if not selected_repos:
         console.print("[bold yellow]No repositories selected to copy.[/bold yellow]")
-        return
+        return False
     
     # Format content for clipboard with clear separation between repositories
     formatted_content = ""
@@ -365,3 +373,5 @@ def copy_selected_repositories(selected_repos):
         title="Copy Complete",
         border_style="green"
     ))
+    
+    return True
