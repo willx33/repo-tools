@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Repo Tools{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <canvas id="matrix-canvas" class="matrix-background"></canvas>
+    <div class="app">
+        <header>
+            <div class="logo">
+                <h1>🛠️ Repo Tools</h1>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="/" {% if request.path == '/' %}class="active"{% endif %}>Home</a></li>
+                    <li><a href="/local-repo" {% if request.path == '/local-repo' %}class="active"{% endif %}>Local Repository</a></li>
+                    <li><a href="/github-repo" {% if request.path == '/github-repo' %}class="active"{% endif %}>GitHub Repository</a></li>
+                </ul>
+            </nav>
+        </header>
+        
+        <main>
+            {% block content %}{% endblock %}
+        </main>
+        
+        <footer>
+            <p>&copy; {{ current_year }} Repo Tools - A Modern CLI Tool</p>
+        </footer>
+    </div>
+    
+    {% block scripts %}{% endblock %}
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Matrix effect
+            const canvas = document.getElementById('matrix-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas dimensions to window size
+            function resizeCanvas() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+            
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            // Matrix effect configuration - brighter and more noticeable
+            const matrix = {
+                fontSize: 16,
+                characters: "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+                drops: [],
+                columns: 0,
+                fallSpeed: 1, // Slightly faster
+                color: '#4caf50', // Full color without transparency for primary characters
+                dimColor: '#225a2490' // Dimmer color for trail characters
+            };
+            
+            // Initialize drops array - with varied density
+            function initDrops() {
+                matrix.columns = Math.floor(canvas.width / matrix.fontSize);
+                matrix.drops = [];
+                
+                // Use fewer columns for a cleaner look (only use 60% of possible columns)
+                const usedColumns = Math.floor(matrix.columns * 0.6);
+                const skipFactor = Math.floor(matrix.columns / usedColumns);
+                
+                for (let i = 0; i < matrix.columns; i++) {
+                    // Only create drops for some columns for a less dense effect
+                    if (i % skipFactor === 0 || Math.random() > 0.7) {
+                        // Random starting position, some already on screen, others above
+                        matrix.drops[i] = Math.random() * -50;
+                    } else {
+                        // Mark unused columns
+                        matrix.drops[i] = null;
+                    }
+                }
+            }
+            
+            initDrops();
+            window.addEventListener('resize', initDrops);
+            
+            // Draw function
+            function draw() {
+                // More transparent background for better visibility of the characters
+                ctx.fillStyle = 'rgba(18, 18, 18, 0.1)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Create a glow effect for brighter characters
+                ctx.shadowBlur = 5;
+                ctx.shadowColor = '#4caf5050';
+                
+                for (let i = 0; i < matrix.drops.length; i++) {
+                    // Skip null drops (columns we're not using)
+                    if (matrix.drops[i] === null) continue;
+                    
+                    // Random character from character set
+                    const character = matrix.characters.charAt(Math.floor(Math.random() * matrix.characters.length));
+                    
+                    // Calculate y position
+                    const yPos = matrix.drops[i] * matrix.fontSize;
+                    
+                    // Highlight the first character of each column - creates the leading edge effect
+                    if (Math.random() > 0.98) {
+                        ctx.fillStyle = '#70ff75'; // Bright highlight color
+                        ctx.font = (matrix.fontSize + 2) + 'px monospace';
+                        ctx.shadowBlur = 10; // Extra glow for leading characters
+                    } else if (Math.random() > 0.90) {
+                        ctx.fillStyle = matrix.color; // Main color
+                        ctx.font = matrix.fontSize + 'px monospace';
+                        ctx.shadowBlur = 5;
+                    } else {
+                        ctx.fillStyle = matrix.dimColor; // Dim color for most characters
+                        ctx.font = matrix.fontSize + 'px monospace';
+                        ctx.shadowBlur = 0; // No glow for background characters
+                    }
+                    
+                    ctx.fillText(character, i * matrix.fontSize, yPos);
+                    
+                    // Move drop down
+                    matrix.drops[i] += matrix.fallSpeed;
+                    
+                    // Reset to top if drop reaches bottom of screen with some randomness
+                    if (yPos > canvas.height && Math.random() > 0.95) {
+                        matrix.drops[i] = 0;
+                    }
+                    
+                    // Random chance of creating a new stream elsewhere
+                    if (Math.random() > 0.9985) {
+                        const newColumn = Math.floor(Math.random() * matrix.columns);
+                        if (matrix.drops[newColumn] === null) {
+                            matrix.drops[newColumn] = 0;
+                        }
+                    }
+                }
+                
+                requestAnimationFrame(draw);
+            }
+            
+            draw();
+        });
+    </script>
+</body>
+</html>

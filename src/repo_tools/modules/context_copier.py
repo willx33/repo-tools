@@ -137,7 +137,8 @@ def repo_context_copier() -> None:
     
     # Generate path options as before
     path_options = generate_path_options(current_dir)
-    # Add "Back to main menu" at the end
+    # Add custom path option and back option
+    path_options.append(("Enter custom path...", "custom"))
     path_options.append(("Back to main menu", None))
     
     # Ask user to select a path - starting cursor at top item
@@ -157,6 +158,26 @@ def repo_context_copier() -> None:
         return
     
     selected_path = answers["path"]
+    
+    # Handle custom path input
+    if selected_path == "custom":
+        console.print("[blue]Enter the absolute path to search for repositories:[/blue]")
+        custom_path = input("> ").strip()
+        
+        # Validate the path
+        if not custom_path:
+            console.print("[yellow]No path entered. Returning to main menu.[/yellow]")
+            return
+        
+        path_obj = Path(custom_path)
+        if not path_obj.exists():
+            console.print(f"[red]Error: Path '{custom_path}' does not exist.[/red]")
+            return
+        if not path_obj.is_dir():
+            console.print(f"[red]Error: Path '{custom_path}' is not a directory.[/red]")
+            return
+        
+        selected_path = path_obj
     console.print(f"[bold blue]Searching for repositories in:[/bold blue] {selected_path}")
     
     # Find git repositories
@@ -235,6 +256,7 @@ def repo_context_copier() -> None:
         # Ask what to do next with simpler options - start from top
         next_action_choices = [
             ("Copy to clipboard", "copy"),
+            ("Refresh repository files", "refresh"),
             ("Continue selecting", "add"),
             ("Back to main menu", "back")
         ]
@@ -267,6 +289,32 @@ def repo_context_copier() -> None:
             # Copy all selected repos
             copy_selected_repositories(selected_repos)
             break
+        elif next_action == "refresh":
+            # Refresh the current repository files
+            console.print(f"[bold blue]Refreshing repository files...[/bold blue]")
+            with Progress() as progress:
+                task = progress.add_task("[green]Reading repository files...", total=None)
+                try:
+                    # Try the new version first (returns a tuple)
+                    files_with_content, ignored_files = get_relevant_files_with_content(selected_repo)
+                except ValueError:
+                    # Fallback for old version (returns just one value)
+                    files_with_content = get_relevant_files_with_content(selected_repo)
+                    ignored_files = []
+                progress.update(task, completed=True)
+            
+            # Update the selected repository with fresh data
+            for i, (repo, _, _) in enumerate(selected_repos):
+                if repo == selected_repo:
+                    selected_repos[i] = (selected_repo, files_with_content, ignored_files)
+                    break
+            
+            # Display updated file summary
+            console.print(f"[bold green]Repository files refreshed![/bold green]")
+            display_file_summary(files_with_content, ignored_files, selected_repo)
+            
+            # Keep the same repository selected and show options again
+            continue
         # For "add", just continue the loop to select more repos
 
 

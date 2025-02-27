@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Repo Tools - Home{% endblock %}
+
+{% block content %}
+<div class="hero">
+    <h2>Welcome to Repo Tools</h2>
+    <p>A modern tool for working with code repositories</p>
+</div>
+
+<div class="features">
+    <div class="feature-card">
+        <div class="feature-icon">🔍</div>
+        <h3>Local Repository</h3>
+        <p>Copy context from local repositories on your machine for AI assistance.</p>
+        <a href="/local-repo" class="btn">Get Started</a>
+    </div>
+    
+    <div class="feature-card">
+        <div class="feature-icon">🌐</div>
+        <h3>GitHub Repository</h3>
+        <p>Clone and extract context from any public GitHub repository.</p>
+        <a href="/github-repo" class="btn">Get Started</a>
+    </div>
+</div>
+
+<div class="info-section">
+    <h3>About Repo Tools</h3>
+    <p>
+        Repo Tools helps you prepare code context from repositories to get better
+        assistance from AI systems. By extracting the most relevant files and code,
+        you can provide better context to AI models.
+    </p>
+</div>
+{% endblock %}

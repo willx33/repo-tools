@@ -1,15 +1,20 @@
 """Command line interface for repo tools."""
 
 import sys
+import atexit
 from rich.console import Console
 
 from repo_tools.menu import display_main_menu
+from repo_tools.webui import stop_webui
 
 console = Console()
 
 
 def main() -> int:
     """Run the CLI application."""
+    # Register shutdown function to ensure WebUI is stopped
+    atexit.register(stop_webui)
+    
     try:
         display_main_menu()
         return 0

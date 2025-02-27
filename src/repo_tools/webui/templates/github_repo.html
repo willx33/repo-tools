@@ -1,0 +1,328 @@
+{% extends "base.html" %}
+
+{% block title %}Repo Tools - GitHub Repository{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>GitHub Repository Context Copier</h2>
+    <p>Clone and copy context from any public GitHub repository</p>
+</div>
+
+<div class="workflow-container">
+    <div class="workflow-step">
+        <h3>Step 1: Enter GitHub Repository URL</h3>
+        <div class="form-group">
+            <label for="github-url">GitHub Repository URL:</label>
+            <input type="text" id="github-url" class="input-dark" placeholder="https://github.com/username/repository">
+            <button id="clone-button" class="btn">Clone Repository</button>
+        </div>
+        <div id="github-loading" class="loading-indicator hidden">
+            <div class="spinner"></div>
+            <p>Cloning repository...</p>
+        </div>
+    </div>
+    
+    <div class="workflow-step hidden" id="step-file-summary">
+        <h3>Step 2: File Summary</h3>
+        
+        <div id="selected-repos-summary" class="summary-section hidden">
+            <h4>Selected Repositories (<span id="selected-repos-count">0</span>/50):</h4>
+            <div id="selected-repos-list" class="repo-list">
+                <!-- Selected repos will be shown here -->
+            </div>
+        </div>
+        
+        <div class="summary-box">
+            <div class="summary-header">
+                <h4>Files to be included:</h4>
+                <span id="included-count" class="count-badge">0 files</span>
+            </div>
+            <div class="file-list" id="included-files">
+                <!-- Files will be populated here -->
+            </div>
+            
+            <div class="summary-header">
+                <h4>Files ignored:</h4>
+                <span id="ignored-count" class="count-badge">0 files</span>
+            </div>
+        </div>
+        
+        <div class="action-buttons">
+            <button id="copy-button" class="btn btn-primary">Copy to Clipboard</button>
+            <button id="refresh-button" class="btn btn-primary">Refresh Repository Files</button>
+            <button id="add-repo-button" class="btn btn-secondary">Add Another Repository</button>
+            <button id="reset-button" class="btn btn-secondary">Start Over</button>
+        </div>
+    </div>
+</div>
+
+<div id="notification" class="notification hidden">
+    <div class="notification-content">
+        <span id="notification-message"></span>
+        <span class="notification-close">&times;</span>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize socket.io
+        const socket = io();
+        
+        // DOM elements
+        const githubUrl = document.getElementById('github-url');
+        const cloneButton = document.getElementById('clone-button');
+        const githubLoading = document.getElementById('github-loading');
+        const stepFileSummary = document.getElementById('step-file-summary');
+        const includedCount = document.getElementById('included-count');
+        const includedFiles = document.getElementById('included-files');
+        const ignoredCount = document.getElementById('ignored-count');
+        const copyButton = document.getElementById('copy-button');
+        const refreshButton = document.getElementById('refresh-button');
+        const addRepoButton = document.getElementById('add-repo-button');
+        const resetButton = document.getElementById('reset-button');
+        const selectedReposSummary = document.getElementById('selected-repos-summary');
+        const selectedReposCount = document.getElementById('selected-repos-count');
+        const selectedReposList = document.getElementById('selected-repos-list');
+        const notification = document.getElementById('notification');
+        const notificationMessage = document.getElementById('notification-message');
+        const notificationClose = document.querySelector('.notification-close');
+        
+        // Repository data
+        let currentRepo = null;
+        let repoFiles = { included: [], ignored: [] };
+        let selectedRepos = [];
+        
+        // Clone GitHub repository
+        function cloneRepository() {
+            const url = githubUrl.value.trim();
+            if (!url || !url.includes('github.com')) {
+                showNotification('Please enter a valid GitHub repository URL', 'error');
+                return;
+            }
+            
+            githubLoading.classList.remove('hidden');
+            
+            // This is a simplified example - in reality, this would need proper implementation
+            // For demo purposes, we'll simulate a GitHub clone
+            setTimeout(() => {
+                githubLoading.classList.add('hidden');
+                
+                // Simulate repository data
+                const repoName = url.split('/').pop().replace('.git', '');
+                
+                // Create dummy files for demo
+                const dummyFiles = [
+                    { path: 'README.md', content: '# ' + repoName + '\n\nThis is a simulated repository.' },
+                    { path: 'index.js', content: 'console.log("Hello from ' + repoName + '");' },
+                    { path: 'package.json', content: '{\n  "name": "' + repoName + '",\n  "version": "1.0.0"\n}' }
+                ];
+                
+                // Update UI
+                includedCount.textContent = `${dummyFiles.length} files`;
+                ignoredCount.textContent = '0 files';
+                
+                // Show included files
+                includedFiles.innerHTML = '';
+                dummyFiles.forEach(file => {
+                    const fileItem = document.createElement('div');
+                    fileItem.classList.add('file-item');
+                    fileItem.innerHTML = `<span class="file-path">${file.path}</span>`;
+                    includedFiles.appendChild(fileItem);
+                });
+                
+                // Store current repository info
+                currentRepo = {
+                    name: repoName,
+                    url: url,
+                    included: dummyFiles,
+                    ignored: []
+                };
+                
+                // Add to selected repositories
+                addToSelectedRepos(currentRepo);
+                
+                // Check if we've reached the limit
+                if (selectedRepos.length >= 50) {
+                    addRepoButton.classList.add('hidden');
+                    showNotification('Maximum of 50 repositories reached', 'info');
+                } else {
+                    addRepoButton.classList.remove('hidden');
+                }
+                
+                // Show file summary step
+                stepFileSummary.classList.remove('hidden');
+                
+                showNotification('GitHub repository simulated for demo purposes', 'info');
+            }, 1500);
+        }
+        
+        // Add repository to selected list
+        function addToSelectedRepos(repo) {
+            // Check if repo is already in the list
+            const exists = selectedRepos.some(r => r.url === repo.url);
+            if (!exists) {
+                selectedRepos.push(repo);
+                
+                // Update the selected repos count
+                selectedReposCount.textContent = selectedRepos.length;
+                
+                // Show the selected repos section
+                selectedReposSummary.classList.remove('hidden');
+                
+                // Update the selected repos list
+                updateSelectedReposList();
+            }
+        }
+        
+        // Update the list of selected repositories
+        function updateSelectedReposList() {
+            selectedReposList.innerHTML = '';
+            
+            selectedRepos.forEach(repo => {
+                const repoItem = document.createElement('div');
+                repoItem.classList.add('repo-item');
+                repoItem.innerHTML = `
+                    <span class="repo-name">${repo.name}</span>
+                    <span class="repo-files">${repo.included.length} files</span>
+                `;
+                selectedReposList.appendChild(repoItem);
+            });
+        }
+        
+        // Copy to clipboard
+        function copyToClipboard() {
+            if (selectedRepos.length === 0) return;
+            
+            // Simulate copy to clipboard
+            showNotification(`${selectedRepos.length} repositories copied to clipboard!`, 'success');
+        }
+        
+        // Add another repository
+        function addAnotherRepo() {
+            // Hide file summary and prepare for new repo
+            stepFileSummary.classList.add('hidden');
+            githubUrl.value = '';
+            currentRepo = null;
+            repoFiles = { included: [], ignored: [] };
+        }
+        
+        // Reset workflow
+        function resetWorkflow() {
+            stepFileSummary.classList.add('hidden');
+            githubUrl.value = '';
+            currentRepo = null;
+            repoFiles = { included: [], ignored: [] };
+            selectedRepos = [];
+            selectedReposSummary.classList.add('hidden');
+            selectedReposCount.textContent = "0";
+            selectedReposList.innerHTML = '';
+            addRepoButton.classList.remove('hidden');
+        }
+        
+        // Show notification
+        function showNotification(message, type = 'info') {
+            notificationMessage.textContent = message;
+            notification.className = 'notification';
+            notification.classList.add(`notification-${type}`);
+            notification.classList.remove('hidden');
+            
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                notification.classList.add('hidden');
+            }, 3000);
+        }
+        
+        // Socket.io events for GitHub clone
+        socket.on('github_clone_start', (data) => {
+            // Nothing needed here, loading indicator already shown
+        });
+        
+        socket.on('github_error', (data) => {
+            githubLoading.classList.add('hidden');
+            showNotification(data.message, 'error');
+        });
+        
+        // Refresh repository files
+        function refreshRepositoryFiles() {
+            if (selectedRepos.length === 0) {
+                showNotification('No repositories to refresh', 'warning');
+                return;
+            }
+            
+            showNotification('Refreshing repository files...', 'info');
+            
+            // Create a loading indicator
+            const loadingIndicator = document.createElement('div');
+            loadingIndicator.classList.add('loading-indicator');
+            loadingIndicator.innerHTML = `
+                <div class="spinner"></div>
+                <p>Refreshing repositories...</p>
+            `;
+            selectedReposSummary.appendChild(loadingIndicator);
+            
+            // Disable buttons during refresh
+            refreshButton.disabled = true;
+            copyButton.disabled = true;
+            
+            // For GitHub repos in the WebUI demo, we'll simulate the refresh
+            // In a full implementation, this would re-fetch the latest data from GitHub
+            
+            setTimeout(() => {
+                // Remove loading indicator
+                loadingIndicator.remove();
+                
+                // Enable buttons
+                refreshButton.disabled = false;
+                copyButton.disabled = false;
+                
+                // Add some simulated changes to demonstrate the refresh
+                selectedRepos.forEach(repo => {
+                    // Add a new simulated file to demonstrate the refresh
+                    const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+                    const newFile = {
+                        path: `updated-${timestamp}.txt`,
+                        content: `This file was added during refresh at ${new Date().toLocaleString()}`
+                    };
+                    
+                    repo.included.push(newFile);
+                });
+                
+                // Update the UI
+                if (currentRepo && selectedRepos.length > 0) {
+                    // Update the current repo to the refreshed version
+                    currentRepo = selectedRepos[selectedRepos.length - 1];
+                    
+                    // Update counts
+                    includedCount.textContent = `${currentRepo.included.length} files`;
+                    
+                    // Refresh file list
+                    includedFiles.innerHTML = '';
+                    currentRepo.included.forEach(file => {
+                        const fileItem = document.createElement('div');
+                        fileItem.classList.add('file-item');
+                        fileItem.innerHTML = `<span class="file-path">${file.path}</span>`;
+                        includedFiles.appendChild(fileItem);
+                    });
+                }
+                
+                // Update the repos list display
+                updateSelectedReposList();
+                
+                showNotification('All repositories refreshed successfully!', 'success');
+            }, 1500);
+        }
+        
+        // Event listeners
+        cloneButton.addEventListener('click', cloneRepository);
+        copyButton.addEventListener('click', copyToClipboard);
+        refreshButton.addEventListener('click', refreshRepositoryFiles);
+        addRepoButton.addEventListener('click', addAnotherRepo);
+        resetButton.addEventListener('click', resetWorkflow);
+        notificationClose.addEventListener('click', () => {
+            notification.classList.add('hidden');
+        });
+    });
+</script>
+{% endblock %}

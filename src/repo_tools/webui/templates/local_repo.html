@@ -1,0 +1,478 @@
+{% extends "base.html" %}
+
+{% block title %}Repo Tools - Local Repository{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Local Repository Context Copier</h2>
+    <p>Copy code context from local repositories on your machine</p>
+</div>
+
+<div class="workflow-container">
+    <div class="workflow-step">
+        <h3>Step 1: Select Path</h3>
+        <div class="form-group">
+            <label for="path-select">Choose a path to search for repositories:</label>
+            <select id="path-select" class="select-dark"></select>
+            <div class="button-group">
+                <button id="scan-button" class="btn">Scan for Repositories</button>
+                <button id="browse-button" class="btn btn-secondary">Browse for Path</button>
+                <input type="file" id="directory-input" webkitdirectory directory multiple style="display: none;" />
+            </div>
+        </div>
+        <div id="custom-path" class="custom-path hidden">
+            <p class="selected-path-label">Selected custom path:</p>
+            <p id="selected-path-display" class="selected-path"></p>
+        </div>
+        <div id="path-loading" class="loading-indicator hidden">
+            <div class="spinner"></div>
+            <p>Scanning for repositories...</p>
+        </div>
+    </div>
+    
+    <div class="workflow-step hidden" id="step-repo-select">
+        <h3>Step 2: Select Repository</h3>
+        <div class="form-group">
+            <label for="repo-select">Choose a repository:</label>
+            <select id="repo-select" class="select-dark"></select>
+            <button id="load-repo-button" class="btn">Load Repository</button>
+        </div>
+        <div id="repo-loading" class="loading-indicator hidden">
+            <div class="spinner"></div>
+            <p>Loading repository files...</p>
+        </div>
+    </div>
+    
+    <div class="workflow-step hidden" id="step-file-summary">
+        <h3>Step 3: File Summary</h3>
+        
+        <div id="selected-repos-summary" class="summary-section hidden">
+            <h4>Selected Repositories (<span id="selected-repos-count">0</span>/50):</h4>
+            <div id="selected-repos-list" class="repo-list">
+                <!-- Selected repos will be shown here -->
+            </div>
+        </div>
+        
+        <div class="summary-box">
+            <div class="summary-header">
+                <h4>Files to be included:</h4>
+                <span id="included-count" class="count-badge">0 files</span>
+            </div>
+            <div class="file-list" id="included-files">
+                <!-- Files will be populated here -->
+            </div>
+            
+            <div class="summary-header">
+                <h4>Files ignored:</h4>
+                <span id="ignored-count" class="count-badge">0 files</span>
+            </div>
+        </div>
+        
+        <div class="action-buttons">
+            <button id="copy-button" class="btn btn-primary">Copy to Clipboard</button>
+            <button id="refresh-button" class="btn btn-primary">Refresh Repository Files</button>
+            <button id="add-repo-button" class="btn btn-secondary">Add Another Repository</button>
+            <button id="reset-button" class="btn btn-secondary">Start Over</button>
+        </div>
+    </div>
+</div>
+
+<div id="notification" class="notification hidden">
+    <div class="notification-content">
+        <span id="notification-message"></span>
+        <span class="notification-close">&times;</span>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize socket.io
+        const socket = io();
+        
+        // DOM elements
+        const pathSelect = document.getElementById('path-select');
+        const scanButton = document.getElementById('scan-button');
+        const browseButton = document.getElementById('browse-button');
+        const directoryInput = document.getElementById('directory-input');
+        const customPath = document.getElementById('custom-path');
+        const selectedPathDisplay = document.getElementById('selected-path-display');
+        const pathLoading = document.getElementById('path-loading');
+        const stepRepoSelect = document.getElementById('step-repo-select');
+        const repoSelect = document.getElementById('repo-select');
+        const loadRepoButton = document.getElementById('load-repo-button');
+        const repoLoading = document.getElementById('repo-loading');
+        const stepFileSummary = document.getElementById('step-file-summary');
+        const includedCount = document.getElementById('included-count');
+        const includedFiles = document.getElementById('included-files');
+        const ignoredCount = document.getElementById('ignored-count');
+        const copyButton = document.getElementById('copy-button');
+        const refreshButton = document.getElementById('refresh-button');
+        const addRepoButton = document.getElementById('add-repo-button');
+        const resetButton = document.getElementById('reset-button');
+        const selectedReposSummary = document.getElementById('selected-repos-summary');
+        const selectedReposCount = document.getElementById('selected-repos-count');
+        const selectedReposList = document.getElementById('selected-repos-list');
+        const notification = document.getElementById('notification');
+        const notificationMessage = document.getElementById('notification-message');
+        const notificationClose = document.querySelector('.notification-close');
+        
+        // Repository data
+        let currentRepo = null;
+        let repoFiles = { included: [], ignored: [] };
+        let selectedRepos = [];
+        
+        // Load paths
+        function loadPaths() {
+            axios.get('/api/paths')
+                .then(response => {
+                    pathSelect.innerHTML = '';
+                    response.data.paths.forEach(path => {
+                        const option = document.createElement('option');
+                        option.value = path.path;
+                        option.textContent = path.display;
+                        pathSelect.appendChild(option);
+                    });
+                })
+                .catch(error => {
+                    showNotification('Error loading paths: ' + error.message, 'error');
+                });
+        }
+        
+        // Scan for repositories
+        function scanRepositories() {
+            // First check if we have a custom path displayed
+            let path;
+            if (!customPath.classList.contains('hidden')) {
+                // Use the custom path from the file browser
+                path = selectedPathDisplay.textContent.trim();
+            } else {
+                // Use the path from the dropdown
+                path = pathSelect.value;
+            }
+            
+            if (!path) {
+                showNotification('Please select a valid path', 'error');
+                return;
+            }
+            
+            pathLoading.classList.remove('hidden');
+            
+            socket.emit('scan_repos', { path: path });
+        }
+        
+        // Handle directory selection via browser's file dialog
+        function handleDirectorySelection(e) {
+            if (e.target.files.length > 0) {
+                // Get the root directory path
+                const rootPath = e.target.files[0].webkitRelativePath.split('/')[0];
+                
+                // Extract the full path in a cross-platform way
+                // This is a limitation of the browser API - we can only get the selected directory name,
+                // not its full path due to security restrictions
+                // We'll display the selected directory name and pass it to the backend
+                
+                // Display the selected directory
+                selectedPathDisplay.textContent = rootPath;
+                customPath.classList.remove('hidden');
+                
+                // Simulate full path for display (this would need backend functionality)
+                // In a real implementation, you would need to resolve this path on the server side
+                showNotification(`Selected directory: ${rootPath}`, 'info');
+            }
+        }
+        
+        // Load repository files
+        function loadRepositoryFiles() {
+            const repoPath = repoSelect.value;
+            if (!repoPath) return;
+            
+            repoLoading.classList.remove('hidden');
+            
+            axios.post('/api/repo-files', { repoPath: repoPath })
+                .then(response => {
+                    repoLoading.classList.add('hidden');
+                    repoFiles = {
+                        included: response.data.included,
+                        ignored: response.data.ignored
+                    };
+                    
+                    // Update UI with file summary
+                    includedCount.textContent = `${response.data.includedCount} files`;
+                    ignoredCount.textContent = `${response.data.ignoredCount} files`;
+                    
+                    // Show included files
+                    includedFiles.innerHTML = '';
+                    repoFiles.included.forEach(file => {
+                        const fileItem = document.createElement('div');
+                        fileItem.classList.add('file-item');
+                        fileItem.innerHTML = `<span class="file-path">${file.path}</span>`;
+                        includedFiles.appendChild(fileItem);
+                    });
+                    
+                    // Store current repository info
+                    currentRepo = {
+                        name: repoSelect.options[repoSelect.selectedIndex].text,
+                        path: repoPath,
+                        included: repoFiles.included,
+                        ignored: repoFiles.ignored
+                    };
+                    
+                    // Add to selected repositories
+                    addToSelectedRepos(currentRepo);
+                    
+                    // Check if we've reached the limit
+                    if (selectedRepos.length >= 50) {
+                        addRepoButton.classList.add('hidden');
+                        showNotification('Maximum of 50 repositories reached', 'info');
+                    } else {
+                        addRepoButton.classList.remove('hidden');
+                    }
+                    
+                    // Show file summary step
+                    stepFileSummary.classList.remove('hidden');
+                })
+                .catch(error => {
+                    repoLoading.classList.add('hidden');
+                    showNotification('Error loading repository files: ' + error.message, 'error');
+                });
+        }
+        
+        // Add repository to selected list
+        function addToSelectedRepos(repo) {
+            // Check if repo is already in the list
+            const exists = selectedRepos.some(r => r.path === repo.path);
+            if (!exists) {
+                selectedRepos.push(repo);
+                
+                // Update the selected repos count
+                selectedReposCount.textContent = selectedRepos.length;
+                
+                // Show the selected repos section
+                selectedReposSummary.classList.remove('hidden');
+                
+                // Update the selected repos list
+                updateSelectedReposList();
+            }
+        }
+        
+        // Update the list of selected repositories
+        function updateSelectedReposList() {
+            selectedReposList.innerHTML = '';
+            
+            selectedRepos.forEach(repo => {
+                const repoItem = document.createElement('div');
+                repoItem.classList.add('repo-item');
+                repoItem.innerHTML = `
+                    <span class="repo-name">${repo.name}</span>
+                    <span class="repo-files">${repo.included.length} files</span>
+                `;
+                selectedReposList.appendChild(repoItem);
+            });
+        }
+        
+        // Copy to clipboard
+        function copyToClipboard() {
+            if (selectedRepos.length === 0) return;
+            
+            axios.post('/api/copy-to-clipboard', { repos: selectedRepos })
+                .then(response => {
+                    showNotification(`${selectedRepos.length} repositories copied to clipboard!`, 'success');
+                })
+                .catch(error => {
+                    showNotification('Error copying to clipboard: ' + error.message, 'error');
+                });
+        }
+        
+        // Add another repository
+        function addAnotherRepo() {
+            // Go back to step 2 (repository selection)
+            stepFileSummary.classList.add('hidden');
+            stepRepoSelect.classList.remove('hidden');
+            currentRepo = null;
+            repoFiles = { included: [], ignored: [] };
+        }
+        
+        // Reset workflow
+        function resetWorkflow() {
+            stepFileSummary.classList.add('hidden');
+            stepRepoSelect.classList.add('hidden');
+            currentRepo = null;
+            repoFiles = { included: [], ignored: [] };
+            selectedRepos = [];
+            selectedReposSummary.classList.add('hidden');
+            selectedReposCount.textContent = "0";
+            selectedReposList.innerHTML = '';
+            addRepoButton.classList.remove('hidden');
+            
+            // Reset the repo selection dropdown
+            repoSelect.innerHTML = '';
+            
+            // Reset custom path display
+            customPath.classList.add('hidden');
+            selectedPathDisplay.textContent = '';
+            
+            // Reset file input
+            directoryInput.value = '';
+            
+            // Go back to step 1
+            loadPaths();
+        }
+        
+        // Show notification
+        function showNotification(message, type = 'info') {
+            notificationMessage.textContent = message;
+            notification.className = 'notification';
+            notification.classList.add(`notification-${type}`);
+            notification.classList.remove('hidden');
+            
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                notification.classList.add('hidden');
+            }, 3000);
+        }
+        
+        // Socket.io events
+        socket.on('scan_start', (data) => {
+            // Nothing needed here, loading indicator already shown
+        });
+        
+        socket.on('scan_complete', (data) => {
+            pathLoading.classList.add('hidden');
+            
+            repoSelect.innerHTML = '';
+            data.repos.forEach(repo => {
+                const option = document.createElement('option');
+                option.value = repo.path;
+                option.textContent = repo.name;
+                repoSelect.appendChild(option);
+            });
+            
+            if (data.repos.length > 0) {
+                stepRepoSelect.classList.remove('hidden');
+            } else {
+                showNotification('No repositories found in the selected path', 'warning');
+            }
+        });
+        
+        socket.on('error', (data) => {
+            pathLoading.classList.add('hidden');
+            showNotification(data.message, 'error');
+        });
+        
+        // Refresh repository files
+        function refreshRepositoryFiles() {
+            if (selectedRepos.length === 0) {
+                showNotification('No repositories to refresh', 'warning');
+                return;
+            }
+            
+            showNotification('Refreshing repository files...', 'info');
+            
+            // Create a loading indicator
+            const loadingIndicator = document.createElement('div');
+            loadingIndicator.classList.add('loading-indicator');
+            loadingIndicator.innerHTML = `
+                <div class="spinner"></div>
+                <p>Refreshing repositories...</p>
+            `;
+            selectedReposSummary.appendChild(loadingIndicator);
+            
+            // Disable buttons during refresh
+            refreshButton.disabled = true;
+            copyButton.disabled = true;
+            
+            // Track completion for multiple repos
+            let refreshedCount = 0;
+            const tempSelectedRepos = [...selectedRepos];
+            selectedRepos = [];
+            
+            // Process each repository
+            tempSelectedRepos.forEach((repo, index) => {
+                setTimeout(() => {
+                    axios.post('/api/repo-files', { repoPath: repo.path })
+                        .then(response => {
+                            // Create updated repo object with fresh data
+                            const updatedRepo = {
+                                name: repo.name,
+                                path: repo.path,
+                                included: response.data.included,
+                                ignored: response.data.ignored
+                            };
+                            
+                            // Add to selected repos
+                            addToSelectedRepos(updatedRepo);
+                            
+                            // Update progress
+                            refreshedCount++;
+                            
+                            // If all repos are processed
+                            if (refreshedCount === tempSelectedRepos.length) {
+                                // Remove loading indicator
+                                loadingIndicator.remove();
+                                
+                                // Update UI
+                                if (currentRepo && selectedRepos.length > 0) {
+                                    // Show the last repo's details
+                                    currentRepo = selectedRepos[selectedRepos.length - 1];
+                                    
+                                    // Update UI with file summary
+                                    includedCount.textContent = `${currentRepo.included.length} files`;
+                                    ignoredCount.textContent = `${currentRepo.ignored.length} files`;
+                                    
+                                    // Show included files
+                                    includedFiles.innerHTML = '';
+                                    currentRepo.included.forEach(file => {
+                                        const fileItem = document.createElement('div');
+                                        fileItem.classList.add('file-item');
+                                        fileItem.innerHTML = `<span class="file-path">${file.path}</span>`;
+                                        includedFiles.appendChild(fileItem);
+                                    });
+                                }
+                                
+                                // Enable buttons
+                                refreshButton.disabled = false;
+                                copyButton.disabled = false;
+                                
+                                showNotification('All repositories refreshed successfully!', 'success');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error refreshing repository:', error);
+                            showNotification(`Error refreshing repository ${repo.name}: ${error.message}`, 'error');
+                            
+                            // Re-add the original repo to prevent data loss
+                            addToSelectedRepos(repo);
+                            
+                            refreshedCount++;
+                            
+                            // If all repos are processed
+                            if (refreshedCount === tempSelectedRepos.length) {
+                                loadingIndicator.remove();
+                                refreshButton.disabled = false;
+                                copyButton.disabled = false;
+                            }
+                        });
+                }, index * 300); // Stagger requests to avoid overwhelming the server
+            });
+        }
+        
+        // Event listeners
+        scanButton.addEventListener('click', scanRepositories);
+        browseButton.addEventListener('click', () => directoryInput.click()); // Trigger the hidden file input
+        directoryInput.addEventListener('change', handleDirectorySelection);
+        loadRepoButton.addEventListener('click', loadRepositoryFiles);
+        copyButton.addEventListener('click', copyToClipboard);
+        refreshButton.addEventListener('click', refreshRepositoryFiles);
+        addRepoButton.addEventListener('click', addAnotherRepo);
+        resetButton.addEventListener('click', resetWorkflow);
+        notificationClose.addEventListener('click', () => {
+            notification.classList.add('hidden');
+        });
+        
+        // Load paths on page load
+        loadPaths();
+    });
+</script>
+{% endblock %}

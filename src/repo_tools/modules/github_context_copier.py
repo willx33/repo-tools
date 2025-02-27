@@ -296,6 +296,7 @@ def github_repo_context_copier() -> None:
         # Ask what to do next - start from top
         next_action_choices = [
             ("Copy to clipboard", "copy"),
+            ("Refresh repository files", "refresh"),
             ("Add another repository", "add"),
             ("Back to main menu", "back")
         ]
@@ -327,6 +328,45 @@ def github_repo_context_copier() -> None:
             # Copy all selected repos
             copy_selected_repositories(selected_repos)
             break
+        elif next_action == "refresh":
+            # Refresh the current repository files - this will re-fetch the latest content
+            console.print(f"[bold blue]Refreshing repository files...[/bold blue]")
+            
+            # Re-clone the repository to get the latest version
+            refreshed_repo_path = clone_github_repo(clean_url)
+            if not refreshed_repo_path:
+                console.print("[bold red]Failed to refresh repository![/bold red]")
+                continue
+                
+            # Get updated files
+            with Progress() as progress:
+                task = progress.add_task("[green]Reading updated repository files...", total=None)
+                refreshed_files, refreshed_ignored = get_relevant_files_with_content(refreshed_repo_path)
+                progress.update(task, completed=True)
+            
+            # Update the selected repository with fresh data
+            for i, (name, url, _, _) in enumerate(selected_repos):
+                if url == clean_url:
+                    selected_repos[i] = (name, url, refreshed_files, refreshed_ignored)
+                    break
+            
+            # Display updated file summary
+            console.print(f"[bold green]Repository files refreshed![/bold green]")
+            display_file_summary(refreshed_files, refreshed_ignored)
+            
+            # Update our current references
+            files_with_content = refreshed_files
+            ignored_files = refreshed_ignored
+            
+            # Clean up the old and new repo paths
+            try:
+                subprocess.run(["rm", "-rf", str(repo_path)], check=False)
+                repo_path = refreshed_repo_path
+            except Exception:
+                pass
+                
+            # Continue to show the same options
+            continue
         # For "add", just continue the loop to select more repos
         
         # Clean up the temporary directory
