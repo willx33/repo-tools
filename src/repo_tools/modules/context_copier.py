@@ -240,8 +240,9 @@ def repo_context_copier() -> bool:
             
         if selected_repo == "copy":  # Copy all selected repos
             # Process the copy operation
-            copy_selected_repositories(selected_repos)
-            return True
+            success = copy_selected_repositories(selected_repos)
+            # Continue showing the repository selection menu
+            continue
         
         # Get all relevant files with content and ignored files
         with Progress() as progress:
@@ -258,69 +259,76 @@ def repo_context_copier() -> bool:
         # Display file summary
         display_file_summary(files_with_content, ignored_files, selected_repo)
         
-        # Ask what to do next with simpler options - start from top
-        next_action_choices = [
-            ("Copy to clipboard", "copy"),
-            ("Refresh repository files", "refresh"),
-            ("Continue selecting", "add"),
-            ("Back to main menu", "back")
-        ]
-        
-        questions = [
-            inquirer.List(
-                "next_action",
-                message="What would you like to do?",
-                choices=next_action_choices,
-                default="copy",  # Make "Copy to clipboard" the default selected option
-                carousel=True,  # Allow wrap-around navigation
-            ),
-        ]
-        
-        answers = inquirer.prompt(questions)
-        
-        if not answers:  # User pressed Ctrl+C
-            return False
-            
-        next_action = answers["next_action"]
-        
-        # Always add the current repo to the selection
+        # Add to selection before showing menu
         repo_name = get_repo_name(selected_repo)
-        selected_repos.append((selected_repo, files_with_content, ignored_files))
-        console.print(f"[bold green]Added '{repo_name}' to selection[/bold green]")
+        if not any(repo == selected_repo for repo, _, _ in selected_repos):
+            selected_repos.append((selected_repo, files_with_content, ignored_files))
+            console.print(f"[bold green]Added '{repo_name}' to selection[/bold green]")
         
-        if next_action == "back":
-            return False
-        elif next_action == "copy":
-            # Copy all selected repos
-            copy_selected_repositories(selected_repos)
-            return True
-        elif next_action == "refresh":
-            # Refresh the current repository files
-            console.print(f"[bold blue]Refreshing repository files...[/bold blue]")
-            with Progress() as progress:
-                task = progress.add_task("[green]Reading repository files...", total=None)
-                try:
-                    # Try the new version first (returns a tuple)
-                    files_with_content, ignored_files = get_relevant_files_with_content(selected_repo)
-                except ValueError:
-                    # Fallback for old version (returns just one value)
-                    files_with_content = get_relevant_files_with_content(selected_repo)
-                    ignored_files = []
-                progress.update(task, completed=True)
+        # Store original file data for refresh operations
+        current_repo = selected_repo
+        
+        # Loop to stay in the "What would you like to do?" menu
+        while True:
+            # Ask what to do next
+            next_action_choices = [
+                ("Copy to clipboard", "copy"),
+                ("Refresh repository files", "refresh"),
+                ("Continue selecting", "add"),
+                ("Back to main menu", "back")
+            ]
             
-            # Update the selected repository with fresh data
-            for i, (repo, _, _) in enumerate(selected_repos):
-                if repo == selected_repo:
-                    selected_repos[i] = (selected_repo, files_with_content, ignored_files)
-                    break
+            questions = [
+                inquirer.List(
+                    "next_action",
+                    message="What would you like to do?",
+                    choices=next_action_choices,
+                    default="copy",  # Make "Copy to clipboard" the default selected option
+                    carousel=True,  # Allow wrap-around navigation
+                ),
+            ]
             
-            # Display updated file summary
-            console.print(f"[bold green]Repository files refreshed![/bold green]")
-            display_file_summary(files_with_content, ignored_files, selected_repo)
+            answers = inquirer.prompt(questions)
             
-            # Keep the same repository selected and show options again
-            continue
-        # For "add", just continue the loop to select more repos
+            if not answers:  # User pressed Ctrl+C
+                return False
+                
+            next_action = answers["next_action"]
+            
+            if next_action == "back":
+                return False
+            elif next_action == "copy":
+                # Copy all selected repos
+                success = copy_selected_repositories(selected_repos)
+                # Keep showing the same menu (just continue the loop)
+                continue
+            elif next_action == "add":
+                # Break out to return to repository selection
+                break
+            elif next_action == "refresh":
+                # Refresh the current repository files
+                console.print(f"[bold blue]Refreshing repository files...[/bold blue]")
+                with Progress() as progress:
+                    task = progress.add_task("[green]Reading repository files...", total=None)
+                    try:
+                        # Try the new version first (returns a tuple)
+                        refreshed_files, refreshed_ignored = get_relevant_files_with_content(current_repo)
+                    except ValueError:
+                        # Fallback for old version (returns just one value)
+                        refreshed_files = get_relevant_files_with_content(current_repo)
+                        refreshed_ignored = []
+                    progress.update(task, completed=True)
+                
+                # Update the selected repository with fresh data
+                for i, (repo, _, _) in enumerate(selected_repos):
+                    if repo == current_repo:
+                        selected_repos[i] = (current_repo, refreshed_files, refreshed_ignored)
+                        break
+                
+                # Display updated file summary
+                console.print(f"[bold green]Repository files refreshed![/bold green]")
+                display_file_summary(refreshed_files, refreshed_ignored, current_repo)
+                continue
 
 
 def copy_selected_repositories(selected_repos) -> bool:

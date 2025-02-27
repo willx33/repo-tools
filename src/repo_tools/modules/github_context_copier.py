@@ -30,12 +30,27 @@ def extract_github_repo_url(input_url: str) -> str:
     Returns:
         A clean GitHub repository URL or None if no valid URL found
     """
+    # Handle empty input
+    if not input_url or input_url.strip() == "":
+        return None
+        
+    # Try to extract from URL pattern
     match = re.search(GITHUB_URL_PATTERN, input_url)
     if match:
         owner, repo = match.groups()
         # Remove .git suffix if present
         repo = repo.replace('.git', '')
         return f"https://github.com/{owner}/{repo}"
+        
+    # If not a URL, check if it might be in format "owner/repo"
+    if '/' in input_url and input_url.count('/') == 1 and ' ' not in input_url:
+        parts = input_url.strip().split('/')
+        if len(parts) == 2 and all(parts):
+            owner, repo = parts
+            # Remove .git suffix if present
+            repo = repo.replace('.git', '')
+            return f"https://github.com/{owner}/{repo}"
+            
     return None
 
 
@@ -255,20 +270,17 @@ def github_repo_context_copier() -> bool:
     selected_repos = []
     
     while True:
-        # Ask for GitHub repository URL
-        questions = [
-            inquirer.Text(
-                "repo_url",
-                message="Enter GitHub repository URL (or type 'back' to return to menu)",
-            ),
-        ]
+        # Create a clear message for URL input
+        console.print("[bold blue]Enter GitHub repository URL (or type 'back' to return to menu)[/bold blue]")
+        console.print("Examples: 'https://github.com/username/repo' or simply 'username/repo'")
         
-        answers = inquirer.prompt(questions)
+        # Handle the URL input using direct input instead of inquirer
+        # This helps avoid issues with WSL and inquirer library rendering for text input
+        repo_url = input("> ").strip()
         
-        if not answers:  # User pressed Ctrl+C
-            return False
-            
-        repo_url = answers["repo_url"].strip()
+        if not repo_url:
+            console.print("[yellow]No input provided, try again or type 'back'[/yellow]")
+            continue
         
         if repo_url.lower() == 'back':
             return False
@@ -277,6 +289,7 @@ def github_repo_context_copier() -> bool:
         clean_url = extract_github_repo_url(repo_url)
         if not clean_url:
             console.print("[bold red]Invalid GitHub repository URL![/bold red]")
+            console.print("Please use format: https://github.com/username/repo or username/repo")
             continue
         
         console.print(f"[bold blue]Processing GitHub repository:[/bold blue] {clean_url}")
@@ -298,87 +311,109 @@ def github_repo_context_copier() -> bool:
         # Display file summary
         display_file_summary(files_with_content, ignored_files)
         
-        # Ask what to do next - start from top
-        next_action_choices = [
-            ("Copy to clipboard", "copy"),
-            ("Refresh repository files", "refresh"),
-            ("Add another repository", "add"),
-            ("Back to main menu", "back")
-        ]
-        
-        questions = [
-            inquirer.List(
-                "next_action",
-                message="What would you like to do?",
-                choices=next_action_choices,
-                default="copy",  # Make "Copy to clipboard" the default selected option
-                carousel=True,  # Allow wrap-around navigation
-            ),
-        ]
-        
-        answers = inquirer.prompt(questions)
-        
-        if not answers:  # User pressed Ctrl+C
-            return False
-            
-        next_action = answers["next_action"]
-        
-        # Add the current repo to the selection
+        # Add the repository to the selection
         selected_repos.append((repo_name, clean_url, files_with_content, ignored_files))
         console.print(f"[bold green]Added '{repo_name}' to selection[/bold green]")
         
-        if next_action == "back":
-            return False
-        elif next_action == "copy":
-            # Copy all selected repos
-            success = copy_selected_repositories(selected_repos)
-            return success
-        elif next_action == "refresh":
-            # Refresh the current repository files - this will re-fetch the latest content
-            console.print(f"[bold blue]Refreshing repository files...[/bold blue]")
+        # Inner loop for options menu
+        while True:
+            # Show options
+            next_action_choices = [
+                ("Copy to clipboard", "copy"),
+                ("Refresh repository files", "refresh"),
+                ("Add another repository", "add"),
+                ("Back to main menu", "back")
+            ]
             
-            # Re-clone the repository to get the latest version
-            refreshed_repo_path = clone_github_repo(clean_url)
-            if not refreshed_repo_path:
-                console.print("[bold red]Failed to refresh repository![/bold red]")
+            questions = [
+                inquirer.List(
+                    "next_action",
+                    message="What would you like to do?",
+                    choices=next_action_choices,
+                    default="copy",  # Make "Copy to clipboard" the default selected option
+                    carousel=True,  # Allow wrap-around navigation
+                ),
+            ]
+            
+            answers = inquirer.prompt(questions)
+            
+            if not answers:  # User pressed Ctrl+C
+                # Clean up before exiting
+                try:
+                    subprocess.run(["rm", "-rf", str(repo_path)], check=False)
+                except Exception:
+                    pass
+                return False
+            
+            next_action = answers["next_action"]
+            
+            if next_action == "back":
+                # Clean up before exiting
+                try:
+                    subprocess.run(["rm", "-rf", str(repo_path)], check=False)
+                except Exception:
+                    pass
+                return False
+                
+            elif next_action == "copy":
+                # Copy all selected repos
+                success = copy_selected_repositories(selected_repos)
+                # Stay in this menu
                 continue
                 
-            # Get updated files
-            with Progress() as progress:
-                task = progress.add_task("[green]Reading updated repository files...", total=None)
-                refreshed_files, refreshed_ignored = get_relevant_files_with_content(refreshed_repo_path)
-                progress.update(task, completed=True)
-            
-            # Update the selected repository with fresh data
-            for i, (name, url, _, _) in enumerate(selected_repos):
-                if url == clean_url:
-                    selected_repos[i] = (name, url, refreshed_files, refreshed_ignored)
-                    break
-            
-            # Display updated file summary
-            console.print(f"[bold green]Repository files refreshed![/bold green]")
-            display_file_summary(refreshed_files, refreshed_ignored)
-            
-            # Update our current references
-            files_with_content = refreshed_files
-            ignored_files = refreshed_ignored
-            
-            # Clean up the old and new repo paths
-            try:
-                subprocess.run(["rm", "-rf", str(repo_path)], check=False)
-                repo_path = refreshed_repo_path
-            except Exception:
-                pass
+            elif next_action == "add":
+                # Clean up before getting a new repository
+                try:
+                    subprocess.run(["rm", "-rf", str(repo_path)], check=False)
+                except Exception:
+                    pass
+                # Break to outer loop to add another repository
+                break
                 
-            # Continue to show the same options
-            continue
-        # For "add", just continue the loop to select more repos
-        
-        # Clean up the temporary directory
-        try:
-            subprocess.run(["rm", "-rf", str(repo_path)], check=False)
-        except Exception:
-            pass
+            elif next_action == "refresh":
+                # Refresh the current repository
+                console.print(f"[bold blue]Refreshing repository files...[/bold blue]")
+                
+                # We need to re-clone the repo to get latest changes
+                try:
+                    # First clean up the old repo directory
+                    subprocess.run(["rm", "-rf", str(repo_path)], check=False)
+                except Exception:
+                    pass
+                
+                # Re-clone the repository
+                refreshed_repo_path = clone_github_repo(clean_url)
+                if not refreshed_repo_path:
+                    console.print("[bold red]Failed to refresh repository![/bold red]")
+                    continue
+                
+                # Update repo_path to the new one
+                repo_path = refreshed_repo_path
+                
+                # Get updated files
+                with Progress() as progress:
+                    task = progress.add_task("[green]Reading updated repository files...", total=None)
+                    refreshed_files, refreshed_ignored = get_relevant_files_with_content(repo_path)
+                    progress.update(task, completed=True)
+                
+                # Update the selected repository with fresh data
+                for i, (name, url, _, _) in enumerate(selected_repos):
+                    if url == clean_url:
+                        selected_repos[i] = (name, url, refreshed_files, refreshed_ignored)
+                        break
+                
+                # Display updated file summary
+                console.print(f"[bold green]Repository files refreshed![/bold green]")
+                display_file_summary(refreshed_files, refreshed_ignored)
+                continue
+    
+    # Clean up at the end (this shouldn't be reached in normal operation)
+    try:
+        subprocess.run(["rm", "-rf", str(repo_path)], check=False)
+    except Exception:
+        pass
+    
+    return True
 
 
 def copy_selected_repositories(selected_repos) -> bool:

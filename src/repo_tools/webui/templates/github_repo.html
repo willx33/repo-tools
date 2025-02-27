@@ -104,58 +104,8 @@
             
             githubLoading.classList.remove('hidden');
             
-            // This is a simplified example - in reality, this would need proper implementation
-            // For demo purposes, we'll simulate a GitHub clone
-            setTimeout(() => {
-                githubLoading.classList.add('hidden');
-                
-                // Simulate repository data
-                const repoName = url.split('/').pop().replace('.git', '');
-                
-                // Create dummy files for demo
-                const dummyFiles = [
-                    { path: 'README.md', content: '# ' + repoName + '\n\nThis is a simulated repository.' },
-                    { path: 'index.js', content: 'console.log("Hello from ' + repoName + '");' },
-                    { path: 'package.json', content: '{\n  "name": "' + repoName + '",\n  "version": "1.0.0"\n}' }
-                ];
-                
-                // Update UI
-                includedCount.textContent = `${dummyFiles.length} files`;
-                ignoredCount.textContent = '0 files';
-                
-                // Show included files
-                includedFiles.innerHTML = '';
-                dummyFiles.forEach(file => {
-                    const fileItem = document.createElement('div');
-                    fileItem.classList.add('file-item');
-                    fileItem.innerHTML = `<span class="file-path">${file.path}</span>`;
-                    includedFiles.appendChild(fileItem);
-                });
-                
-                // Store current repository info
-                currentRepo = {
-                    name: repoName,
-                    url: url,
-                    included: dummyFiles,
-                    ignored: []
-                };
-                
-                // Add to selected repositories
-                addToSelectedRepos(currentRepo);
-                
-                // Check if we've reached the limit
-                if (selectedRepos.length >= 50) {
-                    addRepoButton.classList.add('hidden');
-                    showNotification('Maximum of 50 repositories reached', 'info');
-                } else {
-                    addRepoButton.classList.remove('hidden');
-                }
-                
-                // Show file summary step
-                stepFileSummary.classList.remove('hidden');
-                
-                showNotification('GitHub repository simulated for demo purposes', 'info');
-            }, 1500);
+            // Use socket.io to send the URL to the server
+            socket.emit('github_clone', { url: url });
         }
         
         // Add repository to selected list
@@ -193,10 +143,44 @@
         
         // Copy to clipboard
         function copyToClipboard() {
-            if (selectedRepos.length === 0) return;
+            if (selectedRepos.length === 0) {
+                showNotification('No repositories selected to copy', 'warning');
+                return;
+            }
             
-            // Simulate copy to clipboard
-            showNotification(`${selectedRepos.length} repositories copied to clipboard!`, 'success');
+            // Create loading indicator
+            const loadingIndicator = document.createElement('div');
+            loadingIndicator.classList.add('loading-indicator');
+            loadingIndicator.innerHTML = `
+                <div class="spinner"></div>
+                <p>Copying to clipboard...</p>
+            `;
+            document.body.appendChild(loadingIndicator);
+            
+            // Use the API to copy to clipboard
+            fetch('/api/copy-to-clipboard', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ repos: selectedRepos })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Remove loading indicator
+                loadingIndicator.remove();
+                
+                if (data.success) {
+                    showNotification(`${selectedRepos.length} ${selectedRepos.length === 1 ? 'repository' : 'repositories'} copied to clipboard!`, 'success');
+                } else {
+                    showNotification(data.message || 'Failed to copy to clipboard', 'error');
+                }
+            })
+            .catch(error => {
+                // Remove loading indicator
+                loadingIndicator.remove();
+                showNotification('Error copying to clipboard: ' + error.message, 'error');
+            });
         }
         
         // Add another repository
@@ -266,10 +250,83 @@
             refreshButton.disabled = true;
             copyButton.disabled = true;
             
-            // For GitHub repos in the WebUI demo, we'll simulate the refresh
-            // In a full implementation, this would re-fetch the latest data from GitHub
+            // Track completion for each repository
+            let completedRefreshes = 0;
+            const totalRefreshes = selectedRepos.length;
             
-            setTimeout(() => {
+            // For each selected repo, re-clone and refresh
+            selectedRepos.forEach((repo, index) => {
+                // Only refresh GitHub repositories
+                if (repo.url && repo.url.includes('github.com')) {
+                    // Emit the GitHub clone event for this URL
+                    socket.emit('github_clone', { url: repo.url });
+                    
+                    // Listen for the completion event
+                    const refreshHandler = (data) => {
+                        // Check if this is the repo we're looking for
+                        if (data.url === repo.url) {
+                            // Update the repo with fresh data
+                            selectedRepos[index] = {
+                                name: data.name,
+                                url: data.url,
+                                included: data.included,
+                                ignored: data.ignored
+                            };
+                            
+                            // If this is the current repo being displayed, update UI
+                            if (currentRepo && currentRepo.url === repo.url) {
+                                currentRepo = selectedRepos[index];
+                                
+                                // Update counts
+                                includedCount.textContent = `${data.includedCount} files`;
+                                ignoredCount.textContent = `${data.ignoredCount} files`;
+                                
+                                // Refresh file list
+                                includedFiles.innerHTML = '';
+                                data.included.forEach(file => {
+                                    const fileItem = document.createElement('div');
+                                    fileItem.classList.add('file-item');
+                                    fileItem.innerHTML = `<span class="file-path">${file.path}</span>`;
+                                    includedFiles.appendChild(fileItem);
+                                });
+                            }
+                            
+                            // Count this completion
+                            completedRefreshes++;
+                            
+                            // If we're done with all refreshes
+                            if (completedRefreshes >= totalRefreshes) {
+                                // Clean up
+                                finishRefresh();
+                            }
+                            
+                            // Remove this handler to avoid duplicates
+                            socket.off('github_clone_complete', refreshHandler);
+                        }
+                    };
+                    
+                    // Register a one-time handler for this repo
+                    socket.on('github_clone_complete', refreshHandler);
+                    
+                    // If there's an error, count it as completed but show error
+                    socket.on('github_error', (errorData) => {
+                        completedRefreshes++;
+                        showNotification(`Error refreshing ${repo.name}: ${errorData.message}`, 'error');
+                        
+                        // If we're done with all refreshes
+                        if (completedRefreshes >= totalRefreshes) {
+                            // Clean up
+                            finishRefresh();
+                        }
+                    });
+                } else {
+                    // Non-GitHub repos count as already completed
+                    completedRefreshes++;
+                }
+            });
+            
+            // Function to clean up after all refreshes complete
+            function finishRefresh() {
                 // Remove loading indicator
                 loadingIndicator.remove();
                 
@@ -277,42 +334,72 @@
                 refreshButton.disabled = false;
                 copyButton.disabled = false;
                 
-                // Add some simulated changes to demonstrate the refresh
-                selectedRepos.forEach(repo => {
-                    // Add a new simulated file to demonstrate the refresh
-                    const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
-                    const newFile = {
-                        path: `updated-${timestamp}.txt`,
-                        content: `This file was added during refresh at ${new Date().toLocaleString()}`
-                    };
-                    
-                    repo.included.push(newFile);
-                });
-                
-                // Update the UI
-                if (currentRepo && selectedRepos.length > 0) {
-                    // Update the current repo to the refreshed version
-                    currentRepo = selectedRepos[selectedRepos.length - 1];
-                    
-                    // Update counts
-                    includedCount.textContent = `${currentRepo.included.length} files`;
-                    
-                    // Refresh file list
-                    includedFiles.innerHTML = '';
-                    currentRepo.included.forEach(file => {
-                        const fileItem = document.createElement('div');
-                        fileItem.classList.add('file-item');
-                        fileItem.innerHTML = `<span class="file-path">${file.path}</span>`;
-                        includedFiles.appendChild(fileItem);
-                    });
-                }
-                
                 // Update the repos list display
                 updateSelectedReposList();
                 
                 showNotification('All repositories refreshed successfully!', 'success');
-            }, 1500);
+            }
+            
+            // Timeout in case not all repos complete
+            setTimeout(() => {
+                if (completedRefreshes < totalRefreshes) {
+                    // Clean up
+                    finishRefresh();
+                    showNotification('Some repositories did not refresh in time', 'warning');
+                }
+            }, 30000); // 30 second timeout
         }
+        
+        // Socket.io events for GitHub clone
+        socket.on('github_clone_start', (data) => {
+            // Nothing needed here, loading indicator already shown
+        });
+
+        socket.on('github_error', (data) => {
+            githubLoading.classList.add('hidden');
+            showNotification(data.message, 'error');
+        });
+        
+        socket.on('github_clone_complete', (data) => {
+            githubLoading.classList.add('hidden');
+            
+            // Update UI
+            includedCount.textContent = `${data.includedCount} files`;
+            ignoredCount.textContent = `${data.ignoredCount} files`;
+            
+            // Show included files
+            includedFiles.innerHTML = '';
+            data.included.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.classList.add('file-item');
+                fileItem.innerHTML = `<span class="file-path">${file.path}</span>`;
+                includedFiles.appendChild(fileItem);
+            });
+            
+            // Store current repository info
+            currentRepo = {
+                name: data.name,
+                url: data.url,
+                included: data.included,
+                ignored: data.ignored
+            };
+            
+            // Add to selected repositories
+            addToSelectedRepos(currentRepo);
+            
+            // Check if we've reached the limit
+            if (selectedRepos.length >= 50) {
+                addRepoButton.classList.add('hidden');
+                showNotification('Maximum of 50 repositories reached', 'info');
+            } else {
+                addRepoButton.classList.remove('hidden');
+            }
+            
+            // Show file summary step
+            stepFileSummary.classList.remove('hidden');
+            
+            showNotification(`Repository cloned successfully with ${data.includedCount} files`, 'success');
+        });
         
         // Event listeners
         cloneButton.addEventListener('click', cloneRepository);

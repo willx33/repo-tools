@@ -188,16 +188,61 @@ def handle_scan_repos(data):
 @socketio.on('github_clone')
 def handle_github_clone(data):
     """Handle GitHub repo cloning via WebSockets."""
+    from repo_tools.modules.github_context_copier import extract_github_repo_url, clone_github_repo, get_relevant_files_with_content
+    
     url = data.get('url')
     if not url:
         emit('github_error', {'message': 'No URL provided'})
         return
     
-    emit('github_clone_start', {'url': url})
+    # Extract clean GitHub URL
+    clean_url = extract_github_repo_url(url)
+    if not clean_url:
+        emit('github_error', {'message': 'Invalid GitHub repository URL'})
+        return
     
-    # This would be handled by the actual cloning function
-    # For now, we'll just emit an error since we need to implement the full GitHub clone logic
-    emit('github_error', {'message': 'GitHub cloning not yet implemented in WebUI'})
+    emit('github_clone_start', {'url': clean_url})
+    
+    try:
+        # Clone the repository
+        repo_path = clone_github_repo(clean_url)
+        if not repo_path:
+            emit('github_error', {'message': 'Failed to clone repository'})
+            return
+            
+        # Get repository name from URL
+        repo_name = clean_url.split('/')[-1]
+        
+        # Get all relevant files with content
+        files_with_content, ignored_files = get_relevant_files_with_content(repo_path)
+        
+        # Format files for the frontend
+        included_files = []
+        for file_path, content in files_with_content:
+            included_files.append({
+                "path": str(file_path),
+                "content": content
+            })
+        
+        ignored_files_list = [str(f) for f in ignored_files]
+        
+        # Return the results
+        emit('github_clone_complete', {
+            'name': repo_name,
+            'url': clean_url,
+            'included': included_files,
+            'ignored': ignored_files_list,
+            'includedCount': len(included_files),
+            'ignoredCount': len(ignored_files_list)
+        })
+        
+        # Clean up the temporary directory
+        import subprocess
+        subprocess.run(["rm", "-rf", str(repo_path)], check=False)
+        
+    except Exception as e:
+        emit('github_error', {'message': f'Error processing repository: {str(e)}'})
+        return
 
 # Error handlers
 @app.errorhandler(404)
