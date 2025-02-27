@@ -135,16 +135,19 @@ def repo_context_copier() -> None:
     # Get current directory
     current_dir = Path.cwd()
     
-    # Generate path options
+    # Generate path options as before
     path_options = generate_path_options(current_dir)
+    # Add "Back to main menu" at the end
     path_options.append(("Back to main menu", None))
     
-    # Ask user to select a path
+    # Ask user to select a path - starting cursor at top item
     questions = [
         inquirer.List(
             "path",
             message="Select a path to search for repositories",
             choices=path_options,
+            carousel=True,  # Allow wrap-around navigation
+            default=path_options[0][1],  # Start at the first item
         ),
     ]
     
@@ -177,8 +180,10 @@ def repo_context_copier() -> None:
         if selected_repos:
             selected_names = ", ".join([get_repo_name(repo) for repo, _, _ in selected_repos])
             copy_option = (f"Copy {len(selected_repos)} selected repositories ({selected_names})", "copy")
-            repo_choices.insert(0, copy_option)
+            # Place copy option at the beginning (top)
+            repo_choices = [copy_option] + repo_choices
         
+        # Add "Back to main menu" at the end
         repo_choices.append(("Back to main menu", None))
         
         # Show how many repos are selected if any
@@ -192,6 +197,8 @@ def repo_context_copier() -> None:
                 "repo",
                 message=message,
                 choices=repo_choices,
+                carousel=True,  # Allow wrap-around navigation
+                default=repo_choices[0][1] if repo_choices else None,  # Start at the first item
             ),
         ]
         
@@ -225,7 +232,7 @@ def repo_context_copier() -> None:
         # Display file summary
         display_file_summary(files_with_content, ignored_files, selected_repo)
         
-        # Ask what to do next with simpler options
+        # Ask what to do next with simpler options - start from top
         next_action_choices = [
             ("Copy to clipboard", "copy"),
             ("Continue selecting", "add"),
@@ -237,7 +244,8 @@ def repo_context_copier() -> None:
                 "next_action",
                 message="What would you like to do?",
                 choices=next_action_choices,
-                default="copy"  # Make "Copy to clipboard" the default selected option
+                default="copy",  # Make "Copy to clipboard" the default selected option
+                carousel=True,  # Allow wrap-around navigation
             ),
         ]
         

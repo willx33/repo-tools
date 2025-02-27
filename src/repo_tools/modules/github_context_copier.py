@@ -293,7 +293,7 @@ def github_repo_context_copier() -> None:
         # Display file summary
         display_file_summary(files_with_content, ignored_files)
         
-        # Ask what to do next
+        # Ask what to do next - start from top
         next_action_choices = [
             ("Copy to clipboard", "copy"),
             ("Add another repository", "add"),
@@ -305,7 +305,8 @@ def github_repo_context_copier() -> None:
                 "next_action",
                 message="What would you like to do?",
                 choices=next_action_choices,
-                default="copy"  # Make "Copy to clipboard" the default selected option
+                default="copy",  # Make "Copy to clipboard" the default selected option
+                carousel=True,  # Allow wrap-around navigation
             ),
         ]
         
