@@ -307,6 +307,9 @@
                                 
                                 // Show the file summary step
                                 stepFileSummary.classList.remove('hidden');
+                                
+                                // Save initial selection state to localStorage
+                                saveSelectionState();
                             }
                         })
                         .catch(error => {
@@ -599,6 +602,9 @@
                     
                     // Update the summary counts
                     updateFileSummary();
+                    
+                    // Save selection state to localStorage
+                    saveSelectionState();
                 });
                 
                 checkboxWrapper.appendChild(repoCheckbox);
@@ -817,11 +823,12 @@
             
             // Add indeterminate state if needed
             if (directory.indeterminate) {
+                dirCheckbox.indeterminate = true;
                 dirCheckbox.classList.add('indeterminate');
                 dirCheckbox.dataset.indeterminate = 'true';
             }
             
-            // Handle checkbox changes
+            // Handle checkbox directly - IMPORTANT: Stop both click and change events
             dirCheckbox.addEventListener('click', (e) => {
                 e.stopPropagation(); // Stop event from reaching dirHeader
             });
@@ -835,15 +842,38 @@
                 // Apply selection state to directory and ALL its children recursively
                 updateSelectionState(directory, isSelected);
                 
-                // Update the UI immediately to show changes
-                const newDirElement = renderDirectory(directory, repoName);
-                dirElement.parentNode.replaceChild(newDirElement, dirElement);
+                // Track if this directory was expanded before the change
+                const wasExpanded = dirElement.classList.contains('expanded');
+                
+                // Update the directory's visuals without replacing the whole element
+                // Just update the checkbox state and any visual indicators
+                dirCheckbox.checked = directory.selected;
+                dirCheckbox.indeterminate = directory.indeterminate;
+                
+                if (directory.indeterminate) {
+                    dirCheckbox.classList.add('indeterminate');
+                    dirCheckbox.dataset.indeterminate = 'true';
+                } else {
+                    dirCheckbox.classList.remove('indeterminate');
+                    dirCheckbox.dataset.indeterminate = 'false';
+                }
+                
+                // Recursively update child checkboxes
+                updateChildCheckboxes(dirElement, directory.selected);
+                
+                // Make sure expanded state is preserved
+                if (wasExpanded) {
+                    dirElement.classList.add('expanded');
+                }
                 
                 // Update parent selection states bottom-up
                 updateTreeSelectionStates();
                 
                 // Update the summary counts only - no need to rebuild the entire tree
                 updateFileSummaryWithoutRender();
+                
+                // Save selection state to localStorage
+                saveSelectionState();
             });
             
             checkboxWrapper.appendChild(dirCheckbox);
@@ -899,6 +929,17 @@
             return dirElement;
         }
         
+        // Update all child checkboxes in the DOM
+        function updateChildCheckboxes(parentElement, isSelected) {
+            const childCheckboxes = parentElement.querySelectorAll('.tree-checkbox');
+            childCheckboxes.forEach(checkbox => {
+                checkbox.checked = isSelected;
+                checkbox.indeterminate = false;
+                checkbox.classList.remove('indeterminate');
+                checkbox.dataset.indeterminate = 'false';
+            });
+        }
+        
         // Render file
         function renderFile(file, repoName) {
             const fileElement = document.createElement('div');
@@ -948,6 +989,9 @@
                 
                 // Update the summary counts
                 updateFileSummaryWithoutRender();
+                
+                // Save selection state to localStorage
+                saveSelectionState();
             });
             
             checkboxWrapper.appendChild(fileCheckbox);
@@ -972,6 +1016,389 @@
             });
             
             return fileElement;
+        }
+        
+        // Get current selection state
+        function getSelectionState() {
+            if (!fileTreeData || fileTreeData.length === 0) return null;
+            
+            const state = {};
+            
+            fileTreeData.forEach(repo => {
+                state[repo.name] = {
+                    deselectedPaths: getNodeSelectionPaths(repo),
+                    expansionState: getExpansionState(repo.name)
+                };
+            });
+            
+            return state;
+        }
+        
+        // Get all paths that are NOT selected (more efficient to store deselected items)
+        function getNodeSelectionPaths(node, basePath = '') {
+            let paths = [];
+            
+            // For files, use full path to ensure unique identification
+            if (node.type === 'file' && !node.selected) {
+                // Use the full file path instead of just the name
+                paths.push(node.path);
+            } else if (node.type === 'directory' && !node.selected && !node.indeterminate) {
+                // For directories, use relative path within the repo
+                paths.push(basePath + (node.name || ''));
+            } else if (node.children) {
+                // For selected or indeterminate nodes, check children
+                Object.entries(node.children).forEach(([childName, child]) => {
+                    const childPath = basePath + (node.name ? node.name + '/' : '') + childName;
+                    paths = paths.concat(getNodeSelectionPaths(child, childPath));
+                });
+            }
+            
+            return paths;
+        }
+        
+        // Get current expansion state (which directories are expanded)
+        function getExpansionState(repoName) {
+            const expandedDirs = [];
+            const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repoName}"]`);
+            
+            if (repoElement) {
+                // Get all expanded directories
+                const dirs = repoElement.querySelectorAll('.tree-directory.expanded');
+                dirs.forEach(dir => {
+                    // Build path from repo name to this directory
+                    let path = dir.dataset.name;
+                    let parent = dir.parentElement.closest('.tree-directory');
+                    
+                    while (parent) {
+                        path = parent.dataset.name + '/' + path;
+                        parent = parent.parentElement.closest('.tree-directory');
+                    }
+                    
+                    expandedDirs.push(path);
+                });
+            }
+            
+            return expandedDirs;
+        }
+        
+        // Apply selection state saved previously
+        function applySelectionState(state) {
+            if (!state || !fileTreeData || fileTreeData.length === 0) return;
+            
+            // Apply to each repository
+            fileTreeData.forEach(repo => {
+                const repoState = state[repo.name];
+                if (!repoState) return;
+                
+                // First reset all selections to true (default state)
+                resetSelectionState(repo, true);
+                
+                // Apply deselected paths
+                if (repoState.deselectedPaths) {
+                    repoState.deselectedPaths.forEach(path => {
+                        applySelectionPath(repo, path, false);
+                    });
+                }
+            });
+            
+            // Update all parent selection states bottom-up
+            fileTreeData.forEach(repo => {
+                updateSelectionStatesBottomUp(repo);
+            });
+        }
+        
+        // Apply selection to a specific path
+        function applySelectionPath(node, path, value) {
+            // Direct match for file paths - handles both stored relative and absolute paths
+            if (node.type === 'file' && (path === node.path || path === node.name)) {
+                node.selected = value;
+                return true;
+            }
+            
+            // Direct match for directory names
+            if ((node.type === 'directory' || node.type === 'repo') && path === node.name) {
+                node.selected = value;
+                if (node.children) {
+                    Object.values(node.children).forEach(child => {
+                        resetSelectionState(child, value);
+                    });
+                }
+                return true;
+            }
+            
+            // Handle nested paths for directories
+            if (path.startsWith(node.name + '/') && node.children) {
+                const remainingPath = path.substring(node.name.length + 1);
+                const nextSegment = remainingPath.split('/')[0];
+                
+                if (node.children[nextSegment]) {
+                    return applySelectionPath(node.children[nextSegment], remainingPath, value);
+                }
+            }
+            
+            // Handle absolute file paths match - traverse all children looking for matching path
+            if (node.children && node.type !== 'file') {
+                for (const child of Object.values(node.children)) {
+                    if (child.type === 'file' && child.path === path) {
+                        child.selected = value;
+                        return true;
+                    }
+                    
+                    // Recursively search directories
+                    if (child.type !== 'file' && applySelectionPath(child, path, value)) {
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
+        }
+        
+        // Reset selection state of node and all children
+        function resetSelectionState(node, value) {
+            node.selected = value;
+            node.indeterminate = false;
+            
+            if (node.children) {
+                Object.values(node.children).forEach(child => {
+                    resetSelectionState(child, value);
+                });
+            }
+        }
+        
+        // Apply expansion state
+        function applyExpansionState(state) {
+            if (!state || !fileTreeData || fileTreeData.length === 0) return;
+            
+            // Apply after the tree has been rendered
+            setTimeout(() => {
+                fileTreeData.forEach(repo => {
+                    const repoState = state[repo.name];
+                    if (!repoState || !repoState.expansionState) return;
+                    
+                    const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);
+                    if (!repoElement) return;
+                    
+                    // Apply each expanded directory path
+                    repoState.expansionState.forEach(path => {
+                        applyExpansionPath(repoElement, path);
+                    });
+                });
+            }, 100);
+        }
+        
+        // Apply expansion to a specific path
+        function applyExpansionPath(repoElement, path) {
+            const segments = path.split('/');
+            let currentElement = repoElement;
+            
+            // Navigate through segments to find the directory
+            for (let i = 0; i < segments.length; i++) {
+                const segment = segments[i];
+                const dirElement = currentElement.querySelector(`.tree-directory[data-name="${segment}"]`);
+                
+                if (dirElement) {
+                    dirElement.classList.add('expanded');
+                    currentElement = dirElement;
+                } else {
+                    break;
+                }
+            }
+        }
+        
+        // Update tree selection states bottom-up
+        function updateTreeSelectionStates() {
+            // Update from bottom to top
+            fileTreeData.forEach(repo => {
+                updateSelectionStatesBottomUp(repo);
+            });
+            
+            // Update tree UI to reflect new states
+            const checkboxes = fileTree.querySelectorAll('.tree-checkbox');
+            checkboxes.forEach(checkbox => {
+                const parentElement = checkbox.closest('.tree-repo, .tree-directory, .tree-file');
+                
+                if (parentElement) {
+                    // Find matching node in data
+                    let node = null;
+                    
+                    if (parentElement.classList.contains('tree-repo')) {
+                        const repoName = parentElement.dataset.name;
+                        node = fileTreeData.find(r => r.name === repoName);
+                    }
+                    else if (parentElement.classList.contains('tree-directory')) {
+                        const dirName = parentElement.dataset.name;
+                        const repoElement = parentElement.closest('.tree-repo');
+                        if (repoElement) {
+                            const repoName = repoElement.dataset.name;
+                            const repo = fileTreeData.find(r => r.name === repoName);
+                            if (repo) {
+                                // Find directory by name
+                                node = findNodeByName(repo, dirName);
+                            }
+                        }
+                    }
+                    else if (parentElement.classList.contains('tree-file')) {
+                        const filePath = parentElement.dataset.path;
+                        const repoName = parentElement.dataset.repo;
+                        if (repoName) {
+                            const repo = fileTreeData.find(r => r.name === repoName);
+                            if (repo) {
+                                // Find file by path
+                                node = findNodeByPath(repo, filePath);
+                            }
+                        }
+                    }
+                    
+                    // Update checkbox state to match data
+                    if (node) {
+                        applyCheckboxState(checkbox, node);
+                    }
+                }
+            });
+            
+            // Save selection state
+            saveSelectionState();
+        }
+        
+        // Find a node by name in a tree
+        function findNodeByName(root, name) {
+            if (root.name === name) {
+                return root;
+            }
+            
+            if (root.children) {
+                for (const child of Object.values(root.children)) {
+                    const found = findNodeByName(child, name);
+                    if (found) return found;
+                }
+            }
+            
+            return null;
+        }
+        
+        // Find a node by path in a tree
+        function findNodeByPath(root, path) {
+            if (root.path === path) {
+                return root;
+            }
+            
+            if (root.children) {
+                for (const child of Object.values(root.children)) {
+                    const found = findNodeByPath(child, path);
+                    if (found) return found;
+                }
+            }
+            
+            return null;
+        }
+        
+        // Apply checkbox state based on node
+        function applyCheckboxState(checkbox, node) {
+            checkbox.checked = node.selected;
+            
+            if (node.indeterminate) {
+                checkbox.indeterminate = true;
+                checkbox.classList.add('indeterminate');
+                checkbox.dataset.indeterminate = 'true';
+            } else {
+                checkbox.indeterminate = false;
+                checkbox.classList.remove('indeterminate');
+                checkbox.dataset.indeterminate = 'false';
+            }
+        }
+        
+        // Save selection state to localStorage
+        function saveSelectionState() {
+            if (!fileTreeData || fileTreeData.length === 0) return;
+            
+            try {
+                // Get current state for each repository
+                const state = {};
+                
+                fileTreeData.forEach(repo => {
+                    state[repo.name] = {
+                        deselectedPaths: getNodeSelectionPaths(repo),
+                        expansionState: getExpansionState(repo.name)
+                    };
+                });
+                
+                // Save to localStorage with a key that includes the repository paths
+                const repoKey = selectedRepos.map(r => r.path).sort().join(',');
+                localStorage.setItem(`repo_selection_${repoKey}`, JSON.stringify(state));
+            } catch (e) {
+                console.error('Error saving selection state:', e);
+            }
+        }
+        
+        // Restore selection state from localStorage on page load
+        function restoreSelectionState() {
+            try {
+                if (!selectedRepos || selectedRepos.length === 0) return;
+                
+                // Generate key from repository paths
+                const repoKey = selectedRepos.map(r => r.path).sort().join(',');
+                const savedState = localStorage.getItem(`repo_selection_${repoKey}`);
+                
+                if (savedState) {
+                    const state = JSON.parse(savedState);
+                    
+                    // Convert old format to new format if needed
+                    const newState = {};
+                    Object.keys(state).forEach(repoName => {
+                        if (Array.isArray(state[repoName])) {
+                            // Old format - just deselected paths
+                            newState[repoName] = {
+                                deselectedPaths: state[repoName],
+                                expansionState: []
+                            };
+                        } else {
+                            // New format - already has the right structure
+                            newState[repoName] = state[repoName];
+                        }
+                    });
+                    
+                    // Apply the state to the tree
+                    applySelectionState(newState);
+                    applyExpansionState(newState);
+                    
+                    // Re-render tree with updated selections
+                    updateFileSummaryWithoutRender();
+                }
+            } catch (e) {
+                console.error('Error restoring selection state:', e);
+            }
+        }
+        
+        // Update file summary without re-rendering the tree
+        function updateFileSummaryWithoutRender() {
+            // Calculate total files and selected files
+            let totalIncludedFiles = 0;
+            let totalSelectedFiles = 0;
+            let totalIgnoredFiles = 0;
+            totalTokenCount = 0;
+            let selectedTokenCount = 0;
+            
+            selectedRepos.forEach(repo => {
+                totalIncludedFiles += repo.included.length;
+                totalIgnoredFiles += repo.ignored.length;
+                
+                // Find the corresponding repo in fileTreeData to get token count
+                const repoData = fileTreeData.find(r => r.name === repo.name);
+                if (repoData) {
+                    totalTokenCount += repoData.tokenCount;
+                    selectedTokenCount += getSelectedTokenCount(repoData);
+                    totalSelectedFiles += getSelectedFileCount(repoData);
+                }
+            });
+            
+            // Update counts
+            includedCount.textContent = `${totalSelectedFiles} of ${totalIncludedFiles} files · ~${formatTokenCount(selectedTokenCount)} tokens`;
+            ignoredCount.textContent = `${totalIgnoredFiles} files`;
+            selectedReposCount.textContent = selectedRepos.length;
+            
+            // Update the selected repos list
+            updateSelectedReposList();
         }
         
         // Show file preview
@@ -1191,11 +1618,8 @@
                 const repoData = fileTreeData.find(r => r.name === repo.name);
                 if (repoData) {
                     totalTokenCount += repoData.tokenCount;
-                    if (repoData.selected) {
-                        // Count selected files and tokens
-                        selectedTokenCount += getSelectedTokenCount(repoData);
-                        totalSelectedFiles += getSelectedFileCount(repoData);
-                    }
+                    selectedTokenCount += getSelectedTokenCount(repoData);
+                    totalSelectedFiles += getSelectedFileCount(repoData);
                 }
             });
             
@@ -1371,8 +1795,17 @@
             refreshButton.disabled = true;
             copyButton.disabled = true;
             
-            // Save current selection state before refreshing
-            const savedSelectionState = getSelectionState();
+            // First, map all file paths to their current selection state for direct comparison
+            const fileSelectionMap = {};
+            fileTreeData.forEach(repo => {
+                collectFileSelections(repo, fileSelectionMap);
+            });
+            
+            // Also capture expansion state
+            const expandedDirs = {};
+            fileTreeData.forEach(repo => {
+                expandedDirs[repo.name] = getExpansionState(repo.name);
+            });
             
             // Track completion for multiple repos
             let refreshedCount = 0;
@@ -1396,9 +1829,17 @@
                             // Add to selected repos
                             selectedRepos.push(updatedRepo);
                             
-                            // Convert to tree structure
+                            // Build new tree with default selections
                             const repoTreeData = buildFileTree(updatedRepo.included, updatedRepo.name);
+                            
+                            // Apply saved selections to the new tree
+                            applyFileSelections(repoTreeData, fileSelectionMap);
+                            
+                            // Add to file tree data
                             fileTreeData.push(repoTreeData);
+                            
+                            // Update selection states from bottom to top
+                            updateSelectionStatesBottomUp(repoTreeData);
                             
                             // Update progress
                             refreshedCount++;
@@ -1408,16 +1849,33 @@
                                 // Remove loading indicator
                                 loadingIndicator.remove();
                                 
-                                // Restore selection state
-                                applySelectionState(savedSelectionState);
-                                
-                                // Update UI
-                                updateFileSummary();
+                                // Render tree with applied selections
                                 renderFileTree();
+                                
+                                // Then restore expanded directories
+                                setTimeout(() => {
+                                    fileTreeData.forEach(repo => {
+                                        if (expandedDirs[repo.name] && expandedDirs[repo.name].length > 0) {
+                                            const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);
+                                            if (repoElement) {
+                                                // Expand the repo itself
+                                                repoElement.classList.add('expanded');
+                                                
+                                                // Apply saved expansion state to each directory
+                                                expandedDirs[repo.name].forEach(path => {
+                                                    applyExpansionPath(repoElement, path);
+                                                });
+                                            }
+                                        }
+                                    });
+                                }, 50);
                                 
                                 // Enable buttons
                                 refreshButton.disabled = false;
                                 copyButton.disabled = false;
+                                
+                                // Save the new selection state to localStorage
+                                saveSelectionState();
                                 
                                 showNotification('✅ All repositories refreshed successfully!', 'success');
                             }
@@ -1441,6 +1899,36 @@
                         });
                 }, index * 300); // Stagger requests to avoid overwhelming the server
             });
+        }
+        
+        // Collect file selection states directly by path for accurate mapping
+        function collectFileSelections(node, selectionMap) {
+            if (node.type === 'file') {
+                // Store the selection state by full path for files
+                selectionMap[node.path] = node.selected;
+            }
+            
+            // Recursively process children
+            if (node.children) {
+                Object.values(node.children).forEach(child => {
+                    collectFileSelections(child, selectionMap);
+                });
+            }
+        }
+        
+        // Apply file selection states directly to the new tree
+        function applyFileSelections(node, selectionMap) {
+            if (node.type === 'file' && node.path in selectionMap) {
+                // Apply saved selection state to this file
+                node.selected = selectionMap[node.path];
+            }
+            
+            // Recursively process children
+            if (node.children) {
+                Object.values(node.children).forEach(child => {
+                    applyFileSelections(child, selectionMap);
+                });
+            }
         }
         
         // Show notification
@@ -1558,6 +2046,15 @@
         
         // Load paths on page load
         loadPaths();
+        
+        // Add event listener for page load to restore selection state
+        window.addEventListener('load', function() {
+            // If we have selectedRepos data but no selection state in memory,
+            // try to restore from localStorage
+            if (selectedRepos && selectedRepos.length > 0 && fileTreeData && fileTreeData.length > 0) {
+                restoreSelectionState();
+            }
+        });
     });
 </script>
 {% endblock %}
