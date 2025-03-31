@@ -1148,3 +1148,20 @@ footer {
     flex: 1;
     cursor: pointer;
 }
+
+/* Total tokens display above copy button */
+.total-tokens-display {
+    text-align: center;
+    margin-bottom: 10px;
+    font-weight: bold;
+    color: var(--text-primary);
+}
+
+.token-count-badge {
+    background-color: var(--accent-color);
+    color: white;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 0.9em;
+    margin-left: 5px;
+}

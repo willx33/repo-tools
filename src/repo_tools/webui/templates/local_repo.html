@@ -96,6 +96,11 @@
         </div>
         
         <div class="action-buttons">
+            <!-- Add token count display above button -->
+            <div class="total-tokens-display">
+                <span>Total tokens to be copied: </span>
+                <span id="total-tokens-count" class="token-count-badge">0</span>
+            </div>
             <button id="copy-button" class="btn btn-primary">📋 Copy to Clipboard</button>
             <button id="refresh-button" class="btn btn-info">🔄 Refresh Files</button>
             <button id="back-to-select-button" class="btn btn-secondary">Back</button>
@@ -435,15 +440,17 @@
                 type: 'repo', 
                 children: {}, 
                 expanded: true,
-                fileCount: files.length,
+                fileCount: 0, // Will be calculated below
                 tokenCount: 0,
                 selected: true, // Default selected state
                 indeterminate: false
             };
-            
+            let totalFileCount = 0;
+
             files.forEach(file => {
                 // Estimate tokens in file content
                 const tokenCount = estimateTokens(file.content);
+                totalFileCount++; // Increment total file count for the repo
                 
                 // Extract the relative path (remove repository path prefix if present)
                 let relativePath = file.path;
@@ -456,45 +463,47 @@
                 }
                 
                 // Split path into segments
-                const pathSegments = relativePath.split(/[\/\\]/);
-                let currentLevel = root.children;
+                const pathSegments = relativePath.split(/[/\\]/);
                 
-                // Keep track of directory paths to update token counts later
-                const dirPaths = [];
+                let currentLevelNode = root;
+                const ancestorNodes = [root]; // Store ancestors, starting with root
                 
                 // Navigate through directories, creating as needed
                 for (let i = 0; i < pathSegments.length - 1; i++) {
                     const segment = pathSegments[i];
-                    if (!segment) continue; // Skip empty segments
+                    if (!segment) continue; // Skip empty segments (e.g., from double slashes)
                     
-                    // Build the directory path for this level
+                    // Build the directory path for this level (relative to repo root)
                     const dirPath = pathSegments.slice(0, i + 1).join('/');
-                    dirPaths.push(dirPath);
                     
-                    if (!currentLevel[segment]) {
-                        currentLevel[segment] = { 
+                    if (!currentLevelNode.children[segment]) {
+                        currentLevelNode.children[segment] = { 
                             name: segment, 
                             type: 'directory',
                             children: {},
                             expanded: false,
-                            fileCount: 0,
-                            tokenCount: 0,
-                            path: dirPath,
+                            fileCount: 0, // Initialize file count for new directory
+                            tokenCount: 0, // Initialize token count for new directory
+                            path: dirPath, // Store relative path for the directory
                             selected: true, // Default selected state
                             indeterminate: false
                         };
                     }
-                    currentLevel[segment].fileCount++;
-                    currentLevel = currentLevel[segment].children;
+                    // Increment file count for the directory containing this file/subdir
+                    currentLevelNode.children[segment].fileCount++;
+                    
+                    // Move down to the next level node
+                    currentLevelNode = currentLevelNode.children[segment];
+                    ancestorNodes.push(currentLevelNode); // Add this directory to ancestors
                 }
                 
                 // Add the file at the final level
                 const fileName = pathSegments[pathSegments.length - 1];
                 if (fileName) {
-                    currentLevel[fileName] = { 
+                    currentLevelNode.children[fileName] = { 
                         name: fileName, 
                         type: 'file',
-                        path: file.path,
+                        path: file.path, // Store full original path
                         content: file.content,
                         extension: getFileExtension(fileName),
                         tokenCount: tokenCount,
@@ -502,28 +511,18 @@
                         indeterminate: false
                     };
                     
-                    // Add to repository total token count
-                    root.tokenCount += tokenCount;
-                    
-                    // Update token counts for all parent directories
-                    for (let i = 0; i < dirPaths.length; i++) {
-                        const path = dirPaths[i];
-                        let dir = root.children;
-                        const segments = path.split('/');
-                        
-                        // Navigate to the directory
-                        for (let j = 0; j < segments.length; j++) {
-                            const segment = segments[j];
-                            if (dir[segment]) {
-                                dir[segment].tokenCount += tokenCount;
-                                dir = dir[segment].children;
-                            }
-                        }
-                    }
+                    // Update token counts for all ancestors (directories and the root)
+                    ancestorNodes.forEach(ancestor => {
+                        ancestor.tokenCount += tokenCount;
+                    });
                 }
             });
             
+            // Set the final file count for the root node
+            root.fileCount = totalFileCount;
+
             // After building the tree, update all selection states from bottom to top
+            // (This ensures indeterminate states are set correctly if loaded state is partially selected)
             updateSelectionStatesBottomUp(root);
             
             return root;
@@ -740,7 +739,13 @@
             
             // Update the included count with selected token information
             includedCount.textContent = `${selectedFileCount} of ${totalFileCount} files · ~${formatTokenCount(selectedTokenCount)} tokens`;
-            
+
+            // Update total tokens count above the Copy button
+            const totalTokensCount = document.getElementById('total-tokens-count');
+            if (totalTokensCount) {
+                totalTokensCount.textContent = formatTokenCount(selectedTokenCount);
+            }
+
             // Apply search filter if search input has value
             applySearchFilter();
         }
@@ -751,11 +756,11 @@
                 return node.selected ? 1 : 0;
             }
             
-            if (!node.selected) {
-                return 0; // If node is not selected, none of its children are counted
-            }
+            // Removed the faulty check: if (!node.selected) return 0;
+            // Always recurse down. If a directory/repo is truly deselected 
+            // (selected=false, indeterminate=false), the recursive calls 
+            // to its children will correctly return 0.
             
-            // For directories and repos, sum up selected children
             let count = 0;
             if (node.children) {
                 Object.values(node.children).forEach(child => {
@@ -1453,7 +1458,13 @@
             includedCount.textContent = `${totalSelectedFiles} of ${totalIncludedFiles} files · ~${formatTokenCount(selectedTokenCount)} tokens`;
             ignoredCount.textContent = `${totalIgnoredFiles} files`;
             selectedReposCount.textContent = selectedRepos.length;
-            
+
+            // Update total tokens count above the Copy button
+            const totalTokensCount = document.getElementById('total-tokens-count');
+            if (totalTokensCount) {
+                totalTokensCount.textContent = formatTokenCount(selectedTokenCount);
+            }
+
             // Show the selected repos section
             selectedReposSummary.classList.remove('hidden');
             
@@ -1461,6 +1472,46 @@
             updateSelectedReposList();
         }
         
+        // Update file summary UI
+        function updateFileSummary() {
+            // Calculate total files and selected files
+            let totalIncludedFiles = 0;
+            let totalSelectedFiles = 0;
+            let totalIgnoredFiles = 0;
+            totalTokenCount = 0;
+            let selectedTokenCount = 0;
+
+            selectedRepos.forEach(repo => {
+                totalIncludedFiles += repo.included.length;
+                totalIgnoredFiles += repo.ignored.length;
+
+                // Find the corresponding repo in fileTreeData to get token count
+                const repoData = fileTreeData.find(r => r.name === repo.name);
+                if (repoData) {
+                    totalTokenCount += repoData.tokenCount;
+                    selectedTokenCount += getSelectedTokenCount(repoData);
+                    totalSelectedFiles += getSelectedFileCount(repoData);
+                }
+            });
+
+            // Update counts
+            includedCount.textContent = `${totalSelectedFiles} of ${totalIncludedFiles} files · ~${formatTokenCount(selectedTokenCount)} tokens`;
+            ignoredCount.textContent = `${totalIgnoredFiles} files`;
+            selectedReposCount.textContent = selectedRepos.length;
+
+            // Update total tokens count above the Copy button
+            const totalTokensCount = document.getElementById('total-tokens-count');
+            if (totalTokensCount) {
+                totalTokensCount.textContent = formatTokenCount(selectedTokenCount);
+            }
+
+            // Show the selected repos section
+            selectedReposSummary.classList.remove('hidden');
+
+            // Update the selected repos list
+            updateSelectedReposList();
+        }
+
         // Show file preview
         function showFilePreview(file) {
             filePreviewFilename.textContent = `${file.name} (~${formatTokenCount(file.tokenCount)} tokens)`;
@@ -1661,51 +1712,22 @@
             }
         }
         
-        // Update file summary UI
-        function updateFileSummary() {
-            // Calculate total files and selected files
-            let totalIncludedFiles = 0;
-            let totalSelectedFiles = 0;
-            let totalIgnoredFiles = 0;
-            totalTokenCount = 0;
-            let selectedTokenCount = 0;
-            
-            selectedRepos.forEach(repo => {
-                totalIncludedFiles += repo.included.length;
-                totalIgnoredFiles += repo.ignored.length;
-                
-                // Find the corresponding repo in fileTreeData to get token count
-                const repoData = fileTreeData.find(r => r.name === repo.name);
-                if (repoData) {
-                    totalTokenCount += repoData.tokenCount;
-                    selectedTokenCount += getSelectedTokenCount(repoData);
-                    totalSelectedFiles += getSelectedFileCount(repoData);
-                }
-            });
-            
-            // Update counts
-            includedCount.textContent = `${totalSelectedFiles} of ${totalIncludedFiles} files · ~${formatTokenCount(selectedTokenCount)} tokens`;
-            ignoredCount.textContent = `${totalIgnoredFiles} files`;
-            selectedReposCount.textContent = selectedRepos.length;
-            
-            // Show the selected repos section
-            selectedReposSummary.classList.remove('hidden');
-            
-            // Update the selected repos list
-            updateSelectedReposList();
-        }
-        
         // Get selected token count for a node (recursive)
         function getSelectedTokenCount(node) {
             if (node.type === 'file') {
+                // Base case: file
                 return node.selected ? node.tokenCount : 0;
             }
-            
-            if (!node.selected) {
-                return 0; // If the node is deselected, none of its children are counted
+
+            // If the directory/repo itself is completely deselected, return 0
+            // (A node is completely deselected if selected is false and indeterminate is false)
+            if (!node.selected && !node.indeterminate) {
+                 return 0;
             }
-            
-            // For directories and repos, sum up selected children
+
+            // Recursive case: directory or repo
+            // If it's selected (fully or partially), always sum the selected token counts of its children.
+            // This replaces the previous optimization which could return a stale node.tokenCount.
             let count = 0;
             if (node.children) {
                 Object.values(node.children).forEach(child => {
