@@ -280,6 +280,24 @@ footer {
     background-color: #0b7dda; /* Darker shade of info-color */
 }
 
+.btn-info {
+    background-color: #17a2b8; /* Different blue for info buttons */
+    color: white;
+}
+
+.btn-info:hover {
+    background-color: #138496; /* Darker shade for hover */
+}
+
+.btn-primary {
+    background-color: var(--accent-color);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: var(--accent-hover);
+}
+
 /* Summary Box */
 .summary-box {
     background-color: var(--bg-tertiary);
@@ -510,4 +528,78 @@ footer {
         width: 100%;
         margin-bottom: 0.5rem;
     }
+}
+
+/* Repo Checklist Styles */
+.repo-checklist {
+    max-height: 300px;
+    overflow-y: auto;
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+
+.repo-checkbox-item {
+    padding: 0.8rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+}
+
+.repo-checkbox-item:last-child {
+    border-bottom: none;
+}
+
+.repo-checkbox-item label {
+    margin-bottom: 0;
+    margin-left: 0.5rem;
+    cursor: pointer;
+    flex: 1;
+}
+
+.repo-checkbox-item input[type="checkbox"] {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 2px;
+}
+
+.repo-checkbox-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Disabled Step Styles */
+.workflow-step.disabled {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.workflow-step.disabled::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    z-index: 1;
+}
+
+/* Add relative positioning for workflow steps */
+.workflow-step {
+    position: relative;
+}
+
+/* Selection count badge */
+.selection-count {
+    background-color: var(--accent-color);
+    color: white;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    margin-left: 0.5rem;
 }
