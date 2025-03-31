@@ -949,3 +949,152 @@ footer {
 .tree-directory-token-count {
     background-color: rgba(76, 175, 80, 0.1); /* Light green background - same as file tokens */
 }
+
+/* Tree Checkbox Styles */
+.tree-checkbox {
+    margin-right: 0.5rem;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background-color: var(--bg-tertiary);
+    position: relative;
+    flex-shrink: 0;
+}
+
+.tree-checkbox:checked {
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+}
+
+.tree-checkbox:checked::after {
+    content: "✓";
+    font-size: 12px;
+    color: white;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.tree-checkbox:hover {
+    border-color: var(--accent-color);
+}
+
+/* File Tree Item Styles with Checkboxes */
+.tree-repo-header, .tree-directory-header, .tree-file {
+    display: flex;
+    align-items: center;
+}
+
+.tree-repo-header .tree-checkbox, 
+.tree-directory-header .tree-checkbox, 
+.tree-file .tree-checkbox {
+    margin-right: 0.7rem;
+}
+
+.tree-file-content {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    cursor: pointer;
+}
+
+/* File type colors should apply to the content, not the whole item */
+.tree-file.html .tree-file-icon { color: #e44d26; }
+.tree-file.css .tree-file-icon { color: #264de4; }
+.tree-file.js .tree-file-icon { color: #f7df1e; }
+.tree-file.jsx .tree-file-icon { color: #61dafb; }
+.tree-file.ts .tree-file-icon { color: #007acc; }
+.tree-file.tsx .tree-file-icon { color: #007acc; }
+.tree-file.json .tree-file-icon { color: #5b5b5b; }
+.tree-file.md .tree-file-icon { color: #1e88e5; }
+.tree-file.py .tree-file-icon { color: #3572A5; }
+.tree-file.java .tree-file-icon { color: #b07219; }
+.tree-file.go .tree-file-icon { color: #00ADD8; }
+.tree-file.rb .tree-file-icon { color: #CC342D; }
+.tree-file.php .tree-file-icon { color: #4F5D95; }
+
+/* Indeterminate state for checkboxes - enhance visibility */
+.tree-checkbox.indeterminate {
+    background-color: rgba(76, 175, 80, 0.5);
+    border-color: var(--accent-color);
+    position: relative;
+}
+
+.tree-checkbox.indeterminate::after {
+    content: "−";
+    font-size: 12px;
+    color: white;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* Force indeterminate state display through CSS */
+.tree-checkbox[data-indeterminate="true"] {
+    background-color: rgba(76, 175, 80, 0.5);
+    border-color: var(--accent-color);
+    position: relative;
+}
+
+.tree-checkbox[data-indeterminate="true"]::after {
+    content: "−";
+    font-size: 12px;
+    color: white;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* Add pulsing animation for indeterminate state to draw attention */
+@keyframes pulse-border {
+    0% { border-color: var(--accent-color); }
+    50% { border-color: rgba(76, 175, 80, 0.3); }
+    100% { border-color: var(--accent-color); }
+}
+
+.tree-checkbox.indeterminate,
+.tree-checkbox[data-indeterminate="true"] {
+    animation: pulse-border 2s infinite;
+}
+
+/* Checkbox wrapper to improve click handling */
+.checkbox-wrapper {
+    display: flex;
+    align-items: center;
+    margin-right: 0.5rem;
+    cursor: pointer;
+}
+
+.tree-repo-header .checkbox-wrapper, 
+.tree-directory-header .checkbox-wrapper, 
+.tree-file .checkbox-wrapper {
+    margin-right: 0.7rem;
+}
+
+/* Update tree item styles to work with checkbox wrapper */
+.tree-repo-header, .tree-directory-header, .tree-file {
+    display: flex;
+    align-items: center;
+}
+
+.tree-repo-header .tree-checkbox, 
+.tree-directory-header .tree-checkbox, 
+.tree-file .tree-checkbox {
+    margin-right: 0;
+}
+
+/* Make sure file content has pointer cursor */
+.tree-file-content {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    cursor: pointer;
+}

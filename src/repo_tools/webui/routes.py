@@ -112,40 +112,76 @@ def copy_repo_content():
     """Copy repository content to clipboard."""
     data = request.json
     repos = data.get('repos', [])
+    # Support for both old format and new selected files format
+    selected_repos = data.get('selectedRepos', [])
     
-    if not repos:
-        return jsonify({"error": "No repositories provided"}), 400
-    
-    # Format content for clipboard
-    formatted_content = ""
-    
-    for repo in repos:
-        repo_name = repo.get('name')
-        repo_url = repo.get('url', '')  # GitHub repos have URLs, local repos don't
-        included_files = repo.get('included', [])
+    # If we received the new selected files format, use that
+    if selected_repos:
+        # Format content for clipboard
+        formatted_content = ""
         
-        # Add a repository header with separator
-        formatted_content += f"\n{'=' * 80}\n"
-        if repo_url:
-            formatted_content += f"REPOSITORY: {repo_name} ({repo_url})\n"
-        else:
+        for repo in selected_repos:
+            repo_name = repo.get('name')
+            repo_path = repo.get('path', '')
+            files = repo.get('files', [])
+            
+            # Add a repository header with separator
+            formatted_content += f"\n{'=' * 80}\n"
             formatted_content += f"REPOSITORY: {repo_name}\n"
-        formatted_content += f"{'=' * 80}\n\n"
+            formatted_content += f"{'=' * 80}\n\n"
+            
+            # Add all selected files from this repo
+            for file in files:
+                file_path = file.get('path')
+                content = file.get('content')
+                formatted_content += f"{file_path}:\n{content}\n\n"
         
-        # Add all files from this repo
-        for file in included_files:
-            file_path = file.get('path')
-            content = file.get('content')
-            formatted_content += f"{file_path}:\n{content}\n\n"
+        # Copy to clipboard
+        copy_to_clipboard(formatted_content)
+        
+        # Show toast notification
+        repo_names = ', '.join([repo.get('name') for repo in selected_repos])
+        show_toast(f"Repository files copied to clipboard: {repo_names}")
+        
+        return jsonify({
+            "success": True, 
+            "message": f"Copied {sum(len(repo.get('files', [])) for repo in selected_repos)} files from {len(selected_repos)} repositories to clipboard"
+        })
     
-    # Copy to clipboard
-    copy_to_clipboard(formatted_content)
+    # Legacy format handling
+    elif repos:
+        # Format content for clipboard
+        formatted_content = ""
+        
+        for repo in repos:
+            repo_name = repo.get('name')
+            repo_url = repo.get('url', '')  # GitHub repos have URLs, local repos don't
+            included_files = repo.get('included', [])
+            
+            # Add a repository header with separator
+            formatted_content += f"\n{'=' * 80}\n"
+            if repo_url:
+                formatted_content += f"REPOSITORY: {repo_name} ({repo_url})\n"
+            else:
+                formatted_content += f"REPOSITORY: {repo_name}\n"
+            formatted_content += f"{'=' * 80}\n\n"
+            
+            # Add all files from this repo
+            for file in included_files:
+                file_path = file.get('path')
+                content = file.get('content')
+                formatted_content += f"{file_path}:\n{content}\n\n"
+        
+        # Copy to clipboard
+        copy_to_clipboard(formatted_content)
+        
+        # Show toast notification
+        repo_names = ', '.join([repo.get('name') for repo in repos])
+        show_toast(f"Repositories copied to clipboard: {repo_names}")
+        
+        return jsonify({"success": True, "message": f"Copied {len(repos)} repositories to clipboard"})
     
-    # Show toast notification
-    repo_names = ', '.join([repo.get('name') for repo in repos])
-    show_toast(f"Repositories copied to clipboard: {repo_names}")
-    
-    return jsonify({"success": True, "message": f"Copied {len(repos)} repositories to clipboard"})
+    return jsonify({"error": "No repositories provided"}), 400
 
 # Socket.IO Events
 @socketio.on('connect')

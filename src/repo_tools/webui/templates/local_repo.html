@@ -376,7 +376,9 @@
                 children: {}, 
                 expanded: true,
                 fileCount: files.length,
-                tokenCount: 0
+                tokenCount: 0,
+                selected: true, // Default selected state
+                indeterminate: false
             };
             
             files.forEach(file => {
@@ -417,7 +419,9 @@
                             expanded: false,
                             fileCount: 0,
                             tokenCount: 0,
-                            path: dirPath
+                            path: dirPath,
+                            selected: true, // Default selected state
+                            indeterminate: false
                         };
                     }
                     currentLevel[segment].fileCount++;
@@ -433,7 +437,9 @@
                         path: file.path,
                         content: file.content,
                         extension: getFileExtension(fileName),
-                        tokenCount: tokenCount
+                        tokenCount: tokenCount,
+                        selected: true, // Default selected state
+                        indeterminate: false
                     };
                     
                     // Add to repository total token count
@@ -456,6 +462,9 @@
                     }
                 }
             });
+            
+            // After building the tree, update all selection states from bottom to top
+            updateSelectionStatesBottomUp(root);
             
             return root;
         }
@@ -516,6 +525,9 @@
             // Clear previous content
             fileTree.innerHTML = '';
             totalTokenCount = 0;
+            let selectedTokenCount = 0;
+            let totalFileCount = 0;
+            let selectedFileCount = 0;
             
             // Handle empty case
             if (fileTreeData.length === 0) {
@@ -528,11 +540,24 @@
                 return;
             }
             
-            // Render each repository
+            // Calculate counts first to ensure accuracy
             fileTreeData.forEach(repo => {
-                // Add to total token count
                 totalTokenCount += repo.tokenCount;
+                totalFileCount += repo.fileCount;
                 
+                // Count selected items
+                if (repo.selected) {
+                    selectedTokenCount += repo.tokenCount;
+                    selectedFileCount += repo.fileCount;
+                } else if (repo.indeterminate) {
+                    // For indeterminate state, count only selected children
+                    selectedTokenCount += getSelectedTokenCount(repo);
+                    selectedFileCount += getSelectedFileCount(repo);
+                }
+            });
+
+            // Now render the tree with accurate counts
+            fileTreeData.forEach(repo => {
                 const repoElement = document.createElement('div');
                 repoElement.classList.add('tree-repo');
                 repoElement.dataset.name = repo.name;
@@ -540,6 +565,44 @@
                 // Repository header
                 const repoHeader = document.createElement('div');
                 repoHeader.classList.add('tree-repo-header');
+                
+                // Create checkbox wrapper
+                const checkboxWrapper = document.createElement('div');
+                checkboxWrapper.classList.add('checkbox-wrapper');
+                
+                // Create checkbox for repository
+                const repoCheckbox = document.createElement('input');
+                repoCheckbox.type = 'checkbox';
+                repoCheckbox.checked = repo.selected;
+                repoCheckbox.classList.add('tree-checkbox');
+                
+                // Add indeterminate state if needed
+                if (repo.indeterminate) {
+                    repoCheckbox.classList.add('indeterminate');
+                    repoCheckbox.dataset.indeterminate = 'true';
+                }
+                
+                // Stop event propagation on the checkbox
+                repoCheckbox.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+                
+                repoCheckbox.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    
+                    // Apply selection state to repo and all its children
+                    const isSelected = e.target.checked;
+                    updateSelectionState(repo, isSelected);
+                    
+                    // Re-render tree immediately to reflect changes
+                    renderFileTree();
+                    
+                    // Update the summary counts
+                    updateFileSummary();
+                });
+                
+                checkboxWrapper.appendChild(repoCheckbox);
+                
                 repoHeader.innerHTML = `
                     <div class="tree-repo-name">
                         <span class="tree-repo-icon">📦</span>
@@ -553,6 +616,9 @@
                         <button class="tree-action-button collapse-all">Collapse All</button>
                     </div>
                 `;
+                
+                // Insert checkbox wrapper as first child
+                repoHeader.insertBefore(checkboxWrapper, repoHeader.firstChild);
                 
                 // Repository content
                 const repoContent = document.createElement('div');
@@ -578,7 +644,8 @@
                 });
                 
                 // Keep existing event listeners for expand/collapse all
-                repoHeader.querySelector('.expand-all').addEventListener('click', (e) => {
+                const expandAllBtn = repoHeader.querySelector('.expand-all');
+                expandAllBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const directories = repoElement.querySelectorAll('.tree-directory');
                     directories.forEach(dir => {
@@ -586,7 +653,8 @@
                     });
                 });
                 
-                repoHeader.querySelector('.collapse-all').addEventListener('click', (e) => {
+                const collapseAllBtn = repoHeader.querySelector('.collapse-all');
+                collapseAllBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const directories = repoElement.querySelectorAll('.tree-directory');
                     directories.forEach(dir => {
@@ -595,8 +663,11 @@
                 });
                 
                 // Toggle repository content on header click
-                repoHeader.addEventListener('click', () => {
-                    repoElement.classList.toggle('expanded');
+                repoHeader.addEventListener('click', (e) => {
+                    // Only toggle if not clicking on checkbox, its wrapper, or action buttons
+                    if (!e.target.closest('.checkbox-wrapper') && !e.target.closest('.tree-action-button')) {
+                        repoElement.classList.toggle('expanded');
+                    }
                 });
                 
                 repoElement.appendChild(repoHeader);
@@ -604,20 +675,124 @@
                 fileTree.appendChild(repoElement);
             });
             
-            // Update the included count with token information
-            includedCount.textContent = `${getTotalIncludedFileCount()} files · ~${formatTokenCount(totalTokenCount)} tokens`;
+            // Update the included count with selected token information
+            includedCount.textContent = `${selectedFileCount} of ${totalFileCount} files · ~${formatTokenCount(selectedTokenCount)} tokens`;
             
             // Apply search filter if search input has value
             applySearchFilter();
         }
         
-        // Get total included file count
-        function getTotalIncludedFileCount() {
+        // Get selected file count from a node (repo or directory)
+        function getSelectedFileCount(node) {
+            if (node.type === 'file') {
+                return node.selected ? 1 : 0;
+            }
+            
+            if (!node.selected) {
+                return 0; // If node is not selected, none of its children are counted
+            }
+            
+            // For directories and repos, sum up selected children
             let count = 0;
-            selectedRepos.forEach(repo => {
-                count += repo.included.length;
-            });
+            if (node.children) {
+                Object.values(node.children).forEach(child => {
+                    count += getSelectedFileCount(child);
+                });
+            }
             return count;
+        }
+        
+        // Update selection state recursively
+        function updateSelectionState(node, isSelected) {
+            // Update this node's selection state
+            node.selected = isSelected;
+            // Clear indeterminate state when explicitly selected/deselected
+            node.indeterminate = false;
+            
+            // Apply to all children recursively
+            if (node.children) {
+                Object.values(node.children).forEach(child => {
+                    updateSelectionState(child, isSelected);
+                });
+            }
+        }
+        
+        // Check if all children of a node are selected
+        function areAllChildrenSelected(node) {
+            if (!node.children || Object.keys(node.children).length === 0) {
+                return true;
+            }
+            
+            return Object.values(node.children).every(child => {
+                return child.selected && (child.type === 'file' || areAllChildrenSelected(child));
+            });
+        }
+        
+        // Check if any children of a node are selected
+        function areAnyChildrenSelected(node) {
+            if (!node.children || Object.keys(node.children).length === 0) {
+                return false;
+            }
+            
+            return Object.values(node.children).some(child => {
+                return child.selected || (child.type !== 'file' && areAnyChildrenSelected(child));
+            });
+        }
+        
+        // Update parent selection states based on children
+        function updateParentSelectionState(parentNode) {
+            if (!parentNode.children || Object.keys(parentNode.children).length === 0) {
+                return;
+            }
+            
+            const allSelected = areAllChildrenSelected(parentNode);
+            const anySelected = areAnyChildrenSelected(parentNode);
+            
+            // Set the node's selected state based on children
+            if (allSelected) {
+                parentNode.selected = true;
+                parentNode.indeterminate = false;
+            } else if (!anySelected) {
+                parentNode.selected = false;
+                parentNode.indeterminate = false;
+            } else {
+                // Some but not all children are selected
+                parentNode.selected = false;
+                parentNode.indeterminate = true;
+            }
+            
+            return { allSelected, anySelected, indeterminate: parentNode.indeterminate };
+        }
+        
+        // Update selection states from bottom to top
+        function updateSelectionStatesBottomUp(node) {
+            if (!node.children || Object.keys(node.children).length === 0) {
+                return;
+            }
+            
+            // First update all children recursively
+            Object.values(node.children).forEach(child => {
+                if (child.type === 'directory') {
+                    updateSelectionStatesBottomUp(child);
+                }
+            });
+            
+            // Then update this node based on its children
+            const allSelected = areAllChildrenSelected(node);
+            const anySelected = areAnyChildrenSelected(node);
+            
+            // Update selection state
+            if (allSelected) {
+                node.selected = true;
+                node.indeterminate = false;
+            } else if (!anySelected) {
+                node.selected = false;
+                node.indeterminate = false;
+            } else {
+                // Some but not all children are selected
+                node.selected = false;
+                node.indeterminate = true;
+            }
         }
         
         // Render directory
@@ -629,6 +804,50 @@
             // Directory header
             const dirHeader = document.createElement('div');
             dirHeader.classList.add('tree-directory-header');
+            
+            // Create checkbox wrapper
+            const checkboxWrapper = document.createElement('div');
+            checkboxWrapper.classList.add('checkbox-wrapper');
+            
+            // Create checkbox for directory
+            const dirCheckbox = document.createElement('input');
+            dirCheckbox.type = 'checkbox';
+            dirCheckbox.checked = directory.selected;
+            dirCheckbox.classList.add('tree-checkbox');
+            
+            // Add indeterminate state if needed
+            if (directory.indeterminate) {
+                dirCheckbox.classList.add('indeterminate');
+                dirCheckbox.dataset.indeterminate = 'true';
+            }
+            
+            // Handle checkbox changes
+            dirCheckbox.addEventListener('click', (e) => {
+                e.stopPropagation(); // Stop event from reaching dirHeader
+            });
+            
+            dirCheckbox.addEventListener('change', (e) => {
+                e.stopPropagation();
+                
+                // Get the new selection state
+                const isSelected = e.target.checked;
+                
+                // Apply selection state to directory and ALL its children recursively
+                updateSelectionState(directory, isSelected);
+                
+                // Update the UI immediately to show changes
+                const newDirElement = renderDirectory(directory, repoName);
+                dirElement.parentNode.replaceChild(newDirElement, dirElement);
+                
+                // Update parent selection states bottom-up
+                updateTreeSelectionStates();
+                
+                // Update the summary counts only - no need to rebuild the entire tree
+                updateFileSummaryWithoutRender();
+            });
+            
+            checkboxWrapper.appendChild(dirCheckbox);
+            
             dirHeader.innerHTML = `
                 <div class="tree-directory-name">
                     <span class="tree-directory-icon">▶</span>
@@ -639,6 +858,9 @@
                     <span class="tree-directory-token-count">~${formatTokenCount(directory.tokenCount)} tokens</span>
                 </div>
             `;
+            
+            // Insert checkbox wrapper as first child
+            dirHeader.insertBefore(checkboxWrapper, dirHeader.firstChild);
             
             // Directory content
             const dirContent = document.createElement('div');
@@ -663,10 +885,13 @@
                 }
             });
             
-            // Toggle directory expansion on click
+            // Toggle directory expansion on header click
             dirHeader.addEventListener('click', (e) => {
-                e.stopPropagation();
-                dirElement.classList.toggle('expanded');
+                // Only toggle if not clicking on checkbox or its wrapper
+                if (!e.target.closest('.checkbox-wrapper')) {
+                    e.stopPropagation();
+                    dirElement.classList.toggle('expanded');
+                }
             });
             
             dirElement.appendChild(dirHeader);
@@ -694,14 +919,55 @@
             // File icon
             const fileIcon = getFileIcon(file.extension || '');
             
-            fileElement.innerHTML = `
+            // Create checkbox wrapper
+            const checkboxWrapper = document.createElement('div');
+            checkboxWrapper.classList.add('checkbox-wrapper');
+            
+            // Create checkbox for file
+            const fileCheckbox = document.createElement('input');
+            fileCheckbox.type = 'checkbox';
+            fileCheckbox.checked = file.selected;
+            fileCheckbox.classList.add('tree-checkbox');
+            
+            // Handle checkbox directly
+            fileCheckbox.addEventListener('click', (e) => {
+                e.stopPropagation(); // Stop event from propagating
+            });
+            
+            fileCheckbox.addEventListener('change', (e) => {
+                e.stopPropagation();
+                
+                // Update this file's selection state
+                file.selected = e.target.checked;
+                
+                // Find parent directory and update up the tree
+                updateTreeSelectionStates();
+                
+                // Update just the checkbox appearance
+                applyCheckboxState(fileCheckbox, file);
+                
+                // Update the summary counts
+                updateFileSummaryWithoutRender();
+            });
+            
+            checkboxWrapper.appendChild(fileCheckbox);
+            
+            // Create file element structure
+            const fileContent = document.createElement('div');
+            fileContent.classList.add('tree-file-content');
+            fileContent.innerHTML = `
                 <span class="tree-file-icon">${fileIcon}</span>
                 <span class="tree-file-name">${baseName}<span class="tree-file-ext">.${extension}</span></span>
                 <span class="tree-file-tokens">~${formatTokenCount(file.tokenCount)}</span>
             `;
             
+            // Add checkbox and file content to the element
+            fileElement.appendChild(checkboxWrapper);
+            fileElement.appendChild(fileContent);
+            
             // File click handler
-            fileElement.addEventListener('click', () => {
+            fileContent.addEventListener('click', (e) => {
+                e.stopPropagation();
                 showFilePreview(file);
             });
             
@@ -910,10 +1176,12 @@
         
         // Update file summary UI
         function updateFileSummary() {
-            // Calculate total files
+            // Calculate total files and selected files
             let totalIncludedFiles = 0;
+            let totalSelectedFiles = 0;
             let totalIgnoredFiles = 0;
             totalTokenCount = 0;
+            let selectedTokenCount = 0;
             
             selectedRepos.forEach(repo => {
                 totalIncludedFiles += repo.included.length;
@@ -923,11 +1191,16 @@
                 const repoData = fileTreeData.find(r => r.name === repo.name);
                 if (repoData) {
                     totalTokenCount += repoData.tokenCount;
+                    if (repoData.selected) {
+                        // Count selected files and tokens
+                        selectedTokenCount += getSelectedTokenCount(repoData);
+                        totalSelectedFiles += getSelectedFileCount(repoData);
+                    }
                 }
             });
             
             // Update counts
-            includedCount.textContent = `${totalIncludedFiles} files · ~${formatTokenCount(totalTokenCount)} tokens`;
+            includedCount.textContent = `${totalSelectedFiles} of ${totalIncludedFiles} files · ~${formatTokenCount(selectedTokenCount)} tokens`;
             ignoredCount.textContent = `${totalIgnoredFiles} files`;
             selectedReposCount.textContent = selectedRepos.length;
             
@@ -938,6 +1211,55 @@
             updateSelectedReposList();
         }
         
+        // Get selected token count for a node (recursive)
+        function getSelectedTokenCount(node) {
+            if (node.type === 'file') {
+                return node.selected ? node.tokenCount : 0;
+            }
+            
+            if (!node.selected) {
+                return 0; // If the node is deselected, none of its children are counted
+            }
+            
+            // For directories and repos, sum up selected children
+            let count = 0;
+            if (node.children) {
+                Object.values(node.children).forEach(child => {
+                    count += getSelectedTokenCount(child);
+                });
+            }
+            return count;
+        }
+        
+        // Get selected files from a node (recursive)
+        function getSelectedFiles(node) {
+            const files = [];
+            
+            if (node.type === 'file') {
+                if (node.selected) {
+                    files.push({
+                        path: node.path,
+                        content: node.content
+                    });
+                }
+                return files;
+            }
+            
+            // If this node is not selected, none of its children are included
+            if (!node.selected) {
+                return files;
+            }
+            
+            // For directories and repos, collect from all children
+            if (node.children) {
+                Object.values(node.children).forEach(child => {
+                    files.push(...getSelectedFiles(child));
+                });
+            }
+            
+            return files;
+        }
+        
         // Update the list of selected repositories
         function updateSelectedReposList() {
             selectedReposList.innerHTML = '';
@@ -945,13 +1267,16 @@
             selectedRepos.forEach(repo => {
                 // Find the corresponding repo in fileTreeData to get token count
                 const repoData = fileTreeData.find(r => r.name === repo.name);
-                const tokenCount = repoData ? repoData.tokenCount : 0;
+                const totalTokenCount = repoData ? repoData.tokenCount : 0;
+                const selectedTokenCount = repoData ? getSelectedTokenCount(repoData) : 0;
+                const totalFiles = repo.included.length;
+                const selectedFiles = repoData ? getSelectedFileCount(repoData) : 0;
                 
                 const repoItem = document.createElement('div');
                 repoItem.classList.add('repo-item');
                 repoItem.innerHTML = `
                     <span class="repo-name">📂 ${repo.name}</span>
-                    <span class="repo-files">${repo.included.length} files · ~${formatTokenCount(tokenCount)} tokens</span>
+                    <span class="repo-files">${selectedFiles} of ${totalFiles} files · ~${formatTokenCount(selectedTokenCount)} tokens</span>
                 `;
                 selectedReposList.appendChild(repoItem);
             });
@@ -961,9 +1286,30 @@
         function copyToClipboard() {
             if (selectedRepos.length === 0) return;
             
-            axios.post('/api/copy-to-clipboard', { repos: selectedRepos })
+            // Collect all selected files from the file tree
+            const selectedFilesData = [];
+            fileTreeData.forEach(repo => {
+                const repoFiles = getSelectedFiles(repo);
+                
+                if (repoFiles.length > 0) {
+                    selectedFilesData.push({
+                        name: repo.name,
+                        path: selectedRepos.find(r => r.name === repo.name)?.path || '',
+                        files: repoFiles
+                    });
+                }
+            });
+            
+            // Send only selected files to be copied
+            axios.post('/api/copy-to-clipboard', { selectedRepos: selectedFilesData })
                 .then(response => {
-                    showNotification(`📋 ${selectedRepos.length} repositories copied to clipboard!`, 'success');
+                    // Calculate total selected files
+                    let totalFiles = 0;
+                    selectedFilesData.forEach(repo => {
+                        totalFiles += repo.files.length;
+                    });
+                    
+                    showNotification(`📋 ${totalFiles} files from ${selectedFilesData.length} repositories copied to clipboard!`, 'success');
                 })
                 .catch(error => {
                     showNotification('Error copying to clipboard: ' + error.message, 'error');
@@ -1025,6 +1371,9 @@
             refreshButton.disabled = true;
             copyButton.disabled = true;
             
+            // Save current selection state before refreshing
+            const savedSelectionState = getSelectionState();
+            
             // Track completion for multiple repos
             let refreshedCount = 0;
             const tempSelectedRepos = [...selectedRepos];
@@ -1058,6 +1407,9 @@
                             if (refreshedCount === tempSelectedRepos.length) {
                                 // Remove loading indicator
                                 loadingIndicator.remove();
+                                
+                                // Restore selection state
+                                applySelectionState(savedSelectionState);
                                 
                                 // Update UI
                                 updateFileSummary();
