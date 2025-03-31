@@ -32,6 +32,15 @@
     
     <div class="workflow-step hidden" id="step-repo-select">
         <h3>📋 Step 2: Select Repositories <span id="repo-selection-count" class="selection-count hidden">0</span></h3>
+        
+        <!-- New section for displaying selected repositories with X buttons -->
+        <div id="repo-select-summary" class="summary-section hidden">
+            <h4>Selected Repositories:</h4>
+            <div id="repo-select-list" class="repo-list">
+                <!-- Selected repos will be shown here with X buttons -->
+            </div>
+        </div>
+        
         <div class="form-group">
             <label>Select one or more repositories:</label>
             <div id="repo-checklist" class="repo-checklist">
@@ -141,6 +150,9 @@
         const backToPathButton = document.getElementById('back-to-path-button');
         const repoLoading = document.getElementById('repo-loading');
         
+        const repoSelectSummary = document.getElementById('repo-select-summary');
+        const repoSelectList = document.getElementById('repo-select-list');
+        
         const stepFileSummary = document.getElementById('step-file-summary');
         const includedCount = document.getElementById('included-count');
         const fileTree = document.getElementById('file-tree');
@@ -246,9 +258,54 @@
             
             if (count > 0) {
                 repoSelectionCount.classList.remove('hidden');
+                repoSelectSummary.classList.remove('hidden');
             } else {
                 repoSelectionCount.classList.add('hidden');
+                repoSelectSummary.classList.add('hidden');
             }
+            
+            // Update the selected repositories display in Step 2
+            updateRepoSelectList();
+        }
+        
+        // Update the list of selected repositories in Step 2
+        function updateRepoSelectList() {
+            repoSelectList.innerHTML = '';
+            
+            // Create a select item for each selected repo
+            selectedRepoIds.forEach(repoId => {
+                const repo = availableRepos.find(r => r.id === repoId);
+                if (!repo) return;
+                
+                const repoItem = document.createElement('div');
+                repoItem.classList.add('repo-item');
+                repoItem.innerHTML = `
+                    <span class="repo-name">📂 ${repo.name}</span>
+                    <button class="repo-remove-btn" data-repo-id="${repo.id}">×</button>
+                `;
+                repoSelectList.appendChild(repoItem);
+                
+                // Add event listener to the remove button
+                const removeButton = repoItem.querySelector('.repo-remove-btn');
+                removeButton.addEventListener('click', function() {
+                    const repoId = this.dataset.repoId;
+                    
+                    // Remove from selectedRepoIds
+                    const index = selectedRepoIds.indexOf(repoId);
+                    if (index !== -1) {
+                        selectedRepoIds.splice(index, 1);
+                    }
+                    
+                    // Update the checkbox state
+                    const checkbox = repoChecklist.querySelector(`input[id="${repoId}"]`);
+                    if (checkbox) {
+                        checkbox.checked = false;
+                    }
+                    
+                    // Update UI
+                    updateSelectionCount();
+                });
+            });
         }
         
         // Load selected repositories
@@ -1397,6 +1454,9 @@
             ignoredCount.textContent = `${totalIgnoredFiles} files`;
             selectedReposCount.textContent = selectedRepos.length;
             
+            // Show the selected repos section
+            selectedReposSummary.classList.remove('hidden');
+            
             // Update the selected repos list
             updateSelectedReposList();
         }
@@ -1795,6 +1855,9 @@
             refreshButton.disabled = true;
             copyButton.disabled = true;
             
+            // Save scroll positions before refresh
+            const fileTreeScrollTop = fileTree.scrollTop;
+            
             // First, map all file paths to their current selection state for direct comparison
             const fileSelectionMap = {};
             fileTreeData.forEach(repo => {
@@ -1854,6 +1917,9 @@
                                 
                                 // Then restore expanded directories
                                 setTimeout(() => {
+                                    // Restore scroll position
+                                    fileTree.scrollTop = fileTreeScrollTop;
+                                    
                                     fileTreeData.forEach(repo => {
                                         if (expandedDirs[repo.name] && expandedDirs[repo.name].length > 0) {
                                             const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);

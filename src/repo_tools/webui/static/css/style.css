@@ -314,7 +314,12 @@ footer {
 }
 
 .repo-list {
-    margin: 0.8rem 0;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+    background-color: var(--bg-tertiary);
+    border-radius: 4px;
+    padding: 0.5rem;
 }
 
 .repo-item {
@@ -325,15 +330,60 @@ footer {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.repo-item:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+/* Custom styles for repo items in Step 2 */
+#repo-select-list .repo-item {
+    margin-bottom: 0;
+    border-radius: 0;
+    background-color: transparent;
+}
+
+#repo-select-list .repo-item:first-child {
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+}
+
+#repo-select-list .repo-item:last-child {
+    border-bottom-left-radius: 4px;
+    border-bottom-right-radius: 4px;
 }
 
 .repo-name {
+    flex: 1;
     font-weight: 500;
 }
 
 .repo-files {
-    color: var(--text-secondary);
+    color: var(--text-muted);
     font-size: 0.9rem;
+}
+
+.repo-remove-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1.2rem;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    margin-left: 10px;
+}
+
+.repo-remove-btn:hover {
+    background-color: var(--danger-color);
+    color: white;
 }
 
 .summary-header {

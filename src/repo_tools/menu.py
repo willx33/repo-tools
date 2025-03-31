@@ -35,13 +35,13 @@ def display_main_menu() -> None:
                     "module",
                     message="Select a module",
                     choices=[
+                        ("Start WebUI", "webui"),
                         ("Local Repo Code Context Copier", "context_copier"),
                         ("GitHub Repo Code Context Copier", "github_context_copier"),
-                        ("Start WebUI", "webui"),
                         ("Exit", "exit"),
                     ],
                     carousel=True,  # Allow wrap-around navigation
-                    default="context_copier",  # Start at the first item
+                    default="webui",  # Set WebUI as the default selection
                 ),
             ]
 
