@@ -16,7 +16,7 @@
             <select id="path-select" class="select-dark"></select>
             <div class="button-group">
                 <button id="scan-button" class="btn">Scan for Repositories</button>
-                <button id="browse-button" class="btn btn-secondary">Browse for Path</button>
+                <button id="browse-button" class="btn btn-blue">Browse for Path</button>
                 <input type="file" id="directory-input" webkitdirectory directory multiple style="display: none;" />
             </div>
         </div>
@@ -132,6 +132,12 @@
                         const option = document.createElement('option');
                         option.value = path.path;
                         option.textContent = path.display;
+                        
+                        // Set selected if this is the default path (parent directory)
+                        if (response.data.default && path.path === response.data.default) {
+                            option.selected = true;
+                        }
+                        
                         pathSelect.appendChild(option);
                     });
                 })

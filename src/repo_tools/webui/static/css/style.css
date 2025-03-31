@@ -263,12 +263,21 @@ footer {
 }
 
 .btn-secondary {
-    background-color: var(--bg-tertiary);
-    color: var(--text-primary);
+    background-color: #444444;
+    color: white;
 }
 
 .btn-secondary:hover {
-    background-color: #444;
+    background-color: #333333;
+}
+
+.btn-blue {
+    background-color: var(--info-color);
+    color: white;
+}
+
+.btn-blue:hover {
+    background-color: #0b7dda; /* Darker shade of info-color */
 }
 
 /* Summary Box */

@@ -6,7 +6,7 @@ import argparse
 from rich.console import Console
 
 from repo_tools.menu import display_main_menu
-from repo_tools.webui import start_webui, stop_webui
+from repo_tools.webui import start_webui, stop_webui, is_webui_running, get_webui_url
 
 console = Console()
 
@@ -49,8 +49,9 @@ def main() -> int:
             block = not args.background
             console.print("[bold green]Starting WebUI...[/bold green]")
             start_webui(debug=debug, open_browser=open_browser, block=block)
-            if not block:
-                console.print(f"[green]WebUI is running at http://127.0.0.1:5000/[/green]")
+            if not block and is_webui_running():
+                webui_url = get_webui_url()
+                console.print(f"[green]WebUI is running at {webui_url}[/green]")
                 console.print("[cyan]The WebUI will remain active until you exit this program.[/cyan]")
                 console.print("[cyan]You can continue using the CLI while the WebUI is running.[/cyan]")
                 display_main_menu()

@@ -7,9 +7,10 @@ from flask import render_template, request, jsonify
 from flask_socketio import emit
 
 from repo_tools.webui import app, socketio
-from repo_tools.utils.git import find_git_repos, get_repo_name, get_relevant_files_with_content
+from repo_tools.utils.git import find_git_repos, get_repo_name
 from repo_tools.utils.clipboard import copy_to_clipboard
 from repo_tools.utils.notifications import show_toast
+from repo_tools.modules import process_repository_files, extract_github_repo_url, clone_github_repo
 
 # Routes
 @app.route('/')
@@ -48,7 +49,13 @@ def get_paths():
     # Add root
     path_options.append({"display": str(current), "path": str(current)})
     
-    return jsonify({"paths": path_options})
+    # Set default to parent directory if available (one directory back)
+    default_path = str(current_dir.parent) if current_dir.parent != current_dir else str(current_dir)
+    
+    return jsonify({
+        "paths": path_options,
+        "default": default_path
+    })
 
 @app.route('/api/repos')
 def get_repos():
@@ -78,29 +85,27 @@ def get_repo_files():
         return jsonify({"error": "No repository path provided"}), 400
     
     try:
-        # Try the new version first (returns a tuple)
-        files_with_content, ignored_files = get_relevant_files_with_content(repo_path)
-    except ValueError:
-        # Fallback for old version (returns just one value)
-        files_with_content = get_relevant_files_with_content(repo_path)
-        ignored_files = []
-    
-    # Format response
-    included_files = []
-    for file_path, content in files_with_content:
-        included_files.append({
-            "path": str(file_path),
-            "content": content
+        # Use the API layer to process repository files
+        files_with_content, ignored_files = process_repository_files(repo_path)
+        
+        # Format response
+        included_files = []
+        for file_path, content in files_with_content:
+            included_files.append({
+                "path": str(file_path),
+                "content": content
+            })
+        
+        ignored_files_list = [str(f) for f in ignored_files]
+        
+        return jsonify({
+            "included": included_files,
+            "ignored": ignored_files_list,
+            "includedCount": len(included_files),
+            "ignoredCount": len(ignored_files_list)
         })
-    
-    ignored_files_list = [str(f) for f in ignored_files]
-    
-    return jsonify({
-        "included": included_files,
-        "ignored": ignored_files_list,
-        "includedCount": len(included_files),
-        "ignoredCount": len(ignored_files_list)
-    })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/copy-to-clipboard', methods=['POST'])
 def copy_repo_content():
@@ -188,14 +193,12 @@ def handle_scan_repos(data):
 @socketio.on('github_clone')
 def handle_github_clone(data):
     """Handle GitHub repo cloning via WebSockets."""
-    from repo_tools.modules.github_context_copier import extract_github_repo_url, clone_github_repo, get_relevant_files_with_content
-    
     url = data.get('url')
     if not url:
         emit('github_error', {'message': 'No URL provided'})
         return
     
-    # Extract clean GitHub URL
+    # Extract clean GitHub URL using the API layer
     clean_url = extract_github_repo_url(url)
     if not clean_url:
         emit('github_error', {'message': 'Invalid GitHub repository URL'})
@@ -204,7 +207,7 @@ def handle_github_clone(data):
     emit('github_clone_start', {'url': clean_url})
     
     try:
-        # Clone the repository
+        # Clone the repository using the API layer
         repo_path = clone_github_repo(clean_url)
         if not repo_path:
             emit('github_error', {'message': 'Failed to clone repository'})
@@ -213,8 +216,8 @@ def handle_github_clone(data):
         # Get repository name from URL
         repo_name = clean_url.split('/')[-1]
         
-        # Get all relevant files with content
-        files_with_content, ignored_files = get_relevant_files_with_content(repo_path)
+        # Get all relevant files with content using the API layer
+        files_with_content, ignored_files = process_repository_files(repo_path)
         
         # Format files for the frontend
         included_files = []
