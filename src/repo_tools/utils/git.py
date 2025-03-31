@@ -118,7 +118,8 @@ def should_exclude_file(file_path: str, rel_path: str) -> bool:
     """
     # Always include .env files regardless of location.
     filename = os.path.basename(file_path)
-    if filename == ".env" or filename.startswith(".env."):
+    # Enhanced .env detection to catch all variations (.env.local, .env.development, etc.)
+    if filename == ".env" or filename.startswith(".env.") or ".env" in filename:
         return False
 
     # CRITICAL: Dependency directories to exclude completely (with trailing slash to ensure directory matching)
@@ -126,7 +127,7 @@ def should_exclude_file(file_path: str, rel_path: str) -> bool:
         # Node.js
         "node_modules/",
         # Python
-        "venv/", "env/", ".env/", ".venv/", ".tox/", "site-packages/", "dist-packages/", "__pycache__/",
+        "venv/", "env/", ".venv/", ".tox/", "site-packages/", "dist-packages/", "__pycache__/",
         # Ruby
         "vendor/bundle/", "vendor/ruby/", ".bundle/",
         # Java/Maven/Gradle
@@ -142,7 +143,7 @@ def should_exclude_file(file_path: str, rel_path: str) -> bool:
         # .NET
         "bin/", "obj/", "packages/",
         # General
-        "third_party/", "third-party/", "external/", "deps/", "lib/", "libs/"
+        "third_party/", "third-party/", "external/", "deps/"
     ]
     
     # Check for dependency directories
@@ -161,27 +162,31 @@ def should_exclude_file(file_path: str, rel_path: str) -> bool:
         # Build output directories (usually covered by .gitignore but adding as backup)
         "dist/", "build/", "out/", "target/", ".next/", ".nuxt/", ".output/",
         
-        # Config files that aren't essential for code understanding
-        ".eslintrc", ".prettierrc", ".stylelintrc", ".editorconfig", ".browserslistrc",
-        "tsconfig.json", "jsconfig.json", "babel.config", "webpack.config",
-        "vite.config", "rollup.config", "postcss.config", "tailwind.config",
-        ".npmrc", ".yarnrc", ".nvmrc", ".ruby-version", ".python-version",
-        
         # IDE and editor files
         ".vscode/", ".idea/", ".vs/", "*.iml", "*.sublime-project", "*.sublime-workspace",
         
         # Miscellaneous files
-        "LICENSE", "CHANGELOG", "CODEOWNERS", ".gitattributes", ".github/"
+        "CHANGELOG", "CODEOWNERS", ".gitattributes", ".github/"
     ]
     
-    # File extensions to exclude
+    # File extensions to exclude - only exclude binary and non-code files
     excluded_extensions = [
-        ".map", ".min.js", ".min.css", ".bundle.js", ".bundle.css",
-        ".log", ".pid", ".seed", ".gz", ".zip", ".tar", ".rar",
-        ".tmp", ".temp", ".swp", ".swo",
+        # Source maps
+        ".map",
+        # Minified/bundled
+        ".min.js", ".min.css", ".bundle.js", ".bundle.css",
+        # Logs and temp files
+        ".log", ".pid", ".seed", ".tmp", ".temp", ".swp", ".swo",
+        # Binary
+        ".exe", ".dll", ".so", ".dylib", ".class", ".jar", ".war", ".ear", 
+        # Archives
+        ".gz", ".zip", ".tar", ".rar", ".7z", 
+        # Images
         ".ico", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
         ".psd", ".ai", ".sketch", ".fig", ".xcf",
+        # Media
         ".wav", ".mp3", ".ogg", ".mp4", ".webm", ".avi", ".mov",
+        # Documents
         ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".pdf"
     ]
     
@@ -204,17 +209,35 @@ def should_exclude_file(file_path: str, rel_path: str) -> bool:
     if file_ext in excluded_extensions:
         return True
     
-    # Special case for dot files (.gitignore, etc.)
+    # Special case for dot files (.gitignore, etc.) - we need to be careful not to exclude important config files
     if filename.startswith('.') and not (
-        filename == ".env" or filename.startswith(".env.") or
-        filename.endswith('.js') or
-        filename.endswith('.ts') or
-        filename.endswith('.py') or
-        filename.endswith('.rb') or
-        filename.endswith('.jsx') or
-        filename.endswith('.tsx')
+        # Don't exclude any .env files
+        filename == ".env" or filename.startswith(".env.") or ".env" in filename or
+        # Don't exclude dotfiles with common code extensions
+        filename.endswith('.js') or filename.endswith('.jsx') or 
+        filename.endswith('.ts') or filename.endswith('.tsx') or
+        filename.endswith('.py') or filename.endswith('.rb') or
+        filename.endswith('.go') or filename.endswith('.rs') or
+        filename.endswith('.java') or filename.endswith('.kt') or
+        filename.endswith('.c') or filename.endswith('.cpp') or filename.endswith('.h') or
+        filename.endswith('.cs') or filename.endswith('.fs') or
+        filename.endswith('.php') or filename.endswith('.swift') or
+        # Don't exclude important config files
+        filename == ".gitignore" or filename == ".dockerignore" or
+        filename == ".babelrc" or filename == ".eslintrc.js" or
+        filename == ".prettierrc" or filename == ".editorconfig" or
+        filename.endswith('.json') or filename.endswith('.yaml') or filename.endswith('.yml') or
+        filename.endswith('.xml') or filename.endswith('.toml')
     ):
         return True
+    
+    # Check file size limit to avoid huge files - 1MB limit
+    try:
+        if os.path.getsize(file_path) > 1024 * 1024:
+            return True
+    except (OSError, IOError):
+        # If we can't check the size, assume it's ok
+        pass
     
     return False
 
@@ -232,21 +255,28 @@ def should_include_file(file_path: str) -> bool:
     # File extensions that are likely source code
     included_extensions = [
         # Web
-        ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".scss", ".sass", ".less",
+        ".js", ".jsx", ".ts", ".tsx", ".html", ".css", ".scss", ".sass", ".less", 
+        ".vue", ".svelte", ".astro", ".hbs", ".ejs", ".pug",
         # Backend
         ".py", ".rb", ".php", ".java", ".go", ".rs", ".c", ".cpp", ".h", ".hpp",
         ".cs", ".fs", ".swift", ".kt", ".kts", ".scala", ".clj", ".ex", ".exs",
+        ".dart", ".lua", ".pl", ".pm", ".groovy", ".erl", ".elm", ".hs",
         # Config/Data
-        ".json", ".yml", ".yaml", ".toml", ".ini", ".env.example", ".sql",
+        ".json", ".yml", ".yaml", ".toml", ".ini", ".env.example", ".sql", ".graphql", ".gql",
+        ".xml", ".csv", ".tsv", ".proto", ".mdx", ".nix", ".bat", ".sh", ".ps1",
         # Documentation
-        ".md", ".mdx", ".rst", ".txt"
+        ".md", ".mdx", ".rst", ".txt", ".asciidoc", ".adoc",
+        # Other source formats
+        ".prisma", ".styl", ".hcl", ".tf", ".r"
     ]
     
     # Special files to always include regardless of extension
     important_filenames = [
-        "README", "CONTRIBUTING", "ARCHITECTURE", "Dockerfile", "docker-compose.yml",
+        "README", "CONTRIBUTING", "ARCHITECTURE", "CODEOWNERS", "Dockerfile", "docker-compose.yml",
         "Makefile", "rakefile", "Rakefile", "CMakeLists.txt", "requirements.txt",
-        "go.mod", "go.sum", "build.gradle", "pom.xml", "build.sbt", "Cargo.toml"
+        "go.mod", "go.sum", "build.gradle", "pom.xml", "build.sbt", "Cargo.toml",
+        "package.json", "tsconfig.json", "eslintrc", "prettierrc", "babelrc", 
+        "webpack.config", "vite.config", "rollup.config", "nginx.conf"
     ]
     
     filename = os.path.basename(file_path)
@@ -254,14 +284,14 @@ def should_include_file(file_path: str) -> bool:
     
     # Always include important filenames
     for name in important_filenames:
-        if filename.startswith(name):
+        if filename.startswith(name) or name.lower() in filename.lower():
             return True
 
-    # Always include .env files regardless of extension
-    if filename == ".env" or filename.startswith(".env."):
+    # Always include .env files regardless of extension/naming
+    if filename == ".env" or filename.startswith(".env.") or ".env" in filename:
         return True
     
-    # Include based on extension
+    # Include based on extension - be generous with what we include
     return file_ext in included_extensions
 
 
@@ -290,7 +320,7 @@ def get_relevant_files_with_content(repo_path: Path):
             abs_path = os.path.join(root, file)
             
             # Allow .env files (.env, .env.local, etc.) even if matched in .gitignore
-            is_env_file = file == ".env" or file.startswith(".env.")
+            is_env_file = file == ".env" or file.startswith(".env.") or ".env" in file
             if not is_env_file and gitignore_spec.match_file(rel_path):
                 ignored_files.append(Path(abs_path))
                 continue
