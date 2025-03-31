@@ -63,8 +63,21 @@
                 <h4>Files to be included:</h4>
                 <span id="included-count" class="count-badge">0 files</span>
             </div>
-            <div class="file-list" id="included-files">
-                <!-- Files will be populated here -->
+            
+            <!-- File Tree Search -->
+            <div class="tree-search">
+                <span class="tree-search-icon">🔍</span>
+                <input type="text" id="tree-search-input" class="tree-search-input" placeholder="Search files...">
+                <button id="tree-search-clear" class="tree-search-clear">×</button>
+            </div>
+            
+            <!-- New File Tree View -->
+            <div id="file-tree" class="file-tree">
+                <!-- File tree will be rendered here -->
+                <div class="tree-empty">
+                    <div class="tree-empty-icon">📂</div>
+                    <p>No files loaded yet</p>
+                </div>
             </div>
             
             <div class="summary-header">
@@ -77,6 +90,22 @@
             <button id="copy-button" class="btn btn-primary">📋 Copy to Clipboard</button>
             <button id="refresh-button" class="btn btn-info">🔄 Refresh Files</button>
             <button id="back-to-select-button" class="btn btn-secondary">Back</button>
+        </div>
+    </div>
+</div>
+
+<!-- File Preview Modal -->
+<div id="file-preview-modal" class="file-preview-modal">
+    <div class="file-preview-content">
+        <div class="file-preview-header">
+            <div class="file-preview-title">
+                <span class="file-preview-title-icon">📄</span>
+                <span id="file-preview-filename">filename.ext</span>
+            </div>
+            <button id="file-preview-close" class="file-preview-close">×</button>
+        </div>
+        <div class="file-preview-body">
+            <pre id="file-preview-code" class="file-preview-code"></pre>
         </div>
     </div>
 </div>
@@ -114,7 +143,7 @@
         
         const stepFileSummary = document.getElementById('step-file-summary');
         const includedCount = document.getElementById('included-count');
-        const includedFiles = document.getElementById('included-files');
+        const fileTree = document.getElementById('file-tree');
         const ignoredCount = document.getElementById('ignored-count');
         const copyButton = document.getElementById('copy-button');
         const refreshButton = document.getElementById('refresh-button');
@@ -122,6 +151,17 @@
         const selectedReposSummary = document.getElementById('selected-repos-summary');
         const selectedReposCount = document.getElementById('selected-repos-count');
         const selectedReposList = document.getElementById('selected-repos-list');
+        
+        // File tree search
+        const treeSearchInput = document.getElementById('tree-search-input');
+        const treeSearchClear = document.getElementById('tree-search-clear');
+        
+        // File preview modal
+        const filePreviewModal = document.getElementById('file-preview-modal');
+        const filePreviewFilename = document.getElementById('file-preview-filename');
+        const filePreviewCode = document.getElementById('file-preview-code');
+        const filePreviewClose = document.getElementById('file-preview-close');
+        
         const notification = document.getElementById('notification');
         const notificationMessage = document.getElementById('notification-message');
         const notificationClose = document.querySelector('.notification-close');
@@ -129,9 +169,9 @@
         // Repository data
         let availableRepos = [];
         let selectedRepoIds = []; // Store selected repo IDs
-        let currentRepo = null;
-        let repoFiles = { included: [], ignored: [] };
         let selectedRepos = [];
+        let fileTreeData = []; // Store hierarchical file tree data
+        let totalTokenCount = 0; // Track total tokens across all repos
         
         // Load paths
         function loadPaths() {
@@ -227,6 +267,7 @@
             // Keep track of loaded repositories
             let loadedCount = 0;
             selectedRepos = [];
+            fileTreeData = [];
             
             // Load each selected repository
             selectedRepoIds.forEach((repoId, index) => {
@@ -247,6 +288,10 @@
                             // Add to selected repos
                             selectedRepos.push(loadedRepo);
                             
+                            // Convert the repository's files into a hierarchical tree structure
+                            const repoTreeData = buildFileTree(loadedRepo.included, loadedRepo.name);
+                            fileTreeData.push(repoTreeData);
+                            
                             // Track completion
                             loadedCount++;
                             
@@ -256,6 +301,9 @@
                                 
                                 // Update UI with file summary
                                 updateFileSummary();
+                                
+                                // Render the file tree
+                                renderFileTree();
                                 
                                 // Show the file summary step
                                 stepFileSummary.classList.remove('hidden');
@@ -272,6 +320,7 @@
                                 if (selectedRepos.length > 0) {
                                     // We have at least some repos, so continue
                                     updateFileSummary();
+                                    renderFileTree();
                                     stepFileSummary.classList.remove('hidden');
                                 } else {
                                     // Re-enable Step 2 if no repos were loaded
@@ -298,40 +347,589 @@
             updateSelectionCount();
         }
         
+        // Estimate tokens in text
+        function estimateTokens(text) {
+            if (!text) return 0;
+            
+            // Basic estimation: characters / 4 is a reasonable approximation
+            // For more accuracy, we could use a proper tokenizer library
+            const charCount = text.length;
+            return Math.ceil(charCount / 4);
+        }
+        
+        // Format token count with abbreviation
+        function formatTokenCount(count) {
+            if (count < 1000) {
+                return count.toString();
+            } else if (count < 1000000) {
+                return (Math.round(count / 100) / 10).toFixed(1) + 'k';
+            } else {
+                return (Math.round(count / 100000) / 10).toFixed(1) + 'M';
+            }
+        }
+        
+        // Build a hierarchical file tree from flat file list
+        function buildFileTree(files, repoName) {
+            const root = { 
+                name: repoName, 
+                type: 'repo', 
+                children: {}, 
+                expanded: true,
+                fileCount: files.length,
+                tokenCount: 0
+            };
+            
+            files.forEach(file => {
+                // Estimate tokens in file content
+                const tokenCount = estimateTokens(file.content);
+                
+                // Extract the relative path (remove repository path prefix if present)
+                let relativePath = file.path;
+                if (typeof relativePath === 'string' && relativePath.includes(repoName)) {
+                    // Try to extract the relative path after the repository name
+                    const parts = relativePath.split(repoName);
+                    if (parts.length > 1) {
+                        relativePath = parts[1].replace(/^[\/\\]/, ''); // Remove leading slash
+                    }
+                }
+                
+                // Split path into segments
+                const pathSegments = relativePath.split(/[\/\\]/);
+                let currentLevel = root.children;
+                
+                // Keep track of directory paths to update token counts later
+                const dirPaths = [];
+                
+                // Navigate through directories, creating as needed
+                for (let i = 0; i < pathSegments.length - 1; i++) {
+                    const segment = pathSegments[i];
+                    if (!segment) continue; // Skip empty segments
+                    
+                    // Build the directory path for this level
+                    const dirPath = pathSegments.slice(0, i + 1).join('/');
+                    dirPaths.push(dirPath);
+                    
+                    if (!currentLevel[segment]) {
+                        currentLevel[segment] = { 
+                            name: segment, 
+                            type: 'directory',
+                            children: {},
+                            expanded: false,
+                            fileCount: 0,
+                            tokenCount: 0,
+                            path: dirPath
+                        };
+                    }
+                    currentLevel[segment].fileCount++;
+                    currentLevel = currentLevel[segment].children;
+                }
+                
+                // Add the file at the final level
+                const fileName = pathSegments[pathSegments.length - 1];
+                if (fileName) {
+                    currentLevel[fileName] = { 
+                        name: fileName, 
+                        type: 'file',
+                        path: file.path,
+                        content: file.content,
+                        extension: getFileExtension(fileName),
+                        tokenCount: tokenCount
+                    };
+                    
+                    // Add to repository total token count
+                    root.tokenCount += tokenCount;
+                    
+                    // Update token counts for all parent directories
+                    for (let i = 0; i < dirPaths.length; i++) {
+                        const path = dirPaths[i];
+                        let dir = root.children;
+                        const segments = path.split('/');
+                        
+                        // Navigate to the directory
+                        for (let j = 0; j < segments.length; j++) {
+                            const segment = segments[j];
+                            if (dir[segment]) {
+                                dir[segment].tokenCount += tokenCount;
+                                dir = dir[segment].children;
+                            }
+                        }
+                    }
+                }
+            });
+            
+            return root;
+        }
+        
+        // Get file extension
+        function getFileExtension(filename) {
+            return filename.slice((filename.lastIndexOf('.') - 1 >>> 0) + 2);
+        }
+        
+        // Get file icon based on extension
+        function getFileIcon(extension) {
+            const iconMap = {
+                // Web
+                'html': '📄',
+                'css': '📄',
+                'js': '📄',
+                'jsx': '📄',
+                'ts': '📄',
+                'tsx': '📄',
+                
+                // Config
+                'json': '⚙️',
+                'yml': '⚙️',
+                'yaml': '⚙️',
+                'toml': '⚙️',
+                'env': '🔑',
+                
+                // Backend
+                'py': '🐍',
+                'rb': '💎',
+                'php': '🐘',
+                'java': '☕',
+                'go': '🚀',
+                'rs': '🦀',
+                'c': '🧮',
+                'cpp': '🧮',
+                'cs': '🧮',
+                
+                // Data
+                'sql': '🗄️',
+                'csv': '📊',
+                'xml': '📊',
+                
+                // Documents
+                'md': '📝',
+                'mdx': '📝',
+                'txt': '📝',
+                
+                // Default
+                'default': '📄'
+            };
+            
+            return iconMap[extension.toLowerCase()] || iconMap.default;
+        }
+        
+        // Render file tree
+        function renderFileTree() {
+            // Clear previous content
+            fileTree.innerHTML = '';
+            totalTokenCount = 0;
+            
+            // Handle empty case
+            if (fileTreeData.length === 0) {
+                fileTree.innerHTML = `
+                    <div class="tree-empty">
+                        <div class="tree-empty-icon">📂</div>
+                        <p>No files loaded yet</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Render each repository
+            fileTreeData.forEach(repo => {
+                // Add to total token count
+                totalTokenCount += repo.tokenCount;
+                
+                const repoElement = document.createElement('div');
+                repoElement.classList.add('tree-repo');
+                repoElement.dataset.name = repo.name;
+                
+                // Repository header
+                const repoHeader = document.createElement('div');
+                repoHeader.classList.add('tree-repo-header');
+                repoHeader.innerHTML = `
+                    <div class="tree-repo-name">
+                        <span class="tree-repo-icon">📦</span>
+                        ${repo.name}
+                    </div>
+                    <div class="tree-repo-stats">
+                        ${repo.fileCount} files · ~${formatTokenCount(repo.tokenCount)} tokens
+                    </div>
+                    <div class="tree-repo-actions">
+                        <button class="tree-action-button expand-all">Expand All</button>
+                        <button class="tree-action-button collapse-all">Collapse All</button>
+                    </div>
+                `;
+                
+                // Repository content
+                const repoContent = document.createElement('div');
+                repoContent.classList.add('tree-repo-content');
+                
+                // Add repository children (directories and files)
+                const sortedChildren = Object.values(repo.children)
+                    .sort((a, b) => {
+                        // Directories first, then files
+                        if (a.type !== b.type) {
+                            return a.type === 'directory' ? -1 : 1;
+                        }
+                        // Alphabetical within same type
+                        return a.name.localeCompare(b.name);
+                    });
+                
+                sortedChildren.forEach(child => {
+                    if (child.type === 'directory') {
+                        repoContent.appendChild(renderDirectory(child, repo.name));
+                    } else {
+                        repoContent.appendChild(renderFile(child, repo.name));
+                    }
+                });
+                
+                // Keep existing event listeners for expand/collapse all
+                repoHeader.querySelector('.expand-all').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const directories = repoElement.querySelectorAll('.tree-directory');
+                    directories.forEach(dir => {
+                        dir.classList.add('expanded');
+                    });
+                });
+                
+                repoHeader.querySelector('.collapse-all').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const directories = repoElement.querySelectorAll('.tree-directory');
+                    directories.forEach(dir => {
+                        dir.classList.remove('expanded');
+                    });
+                });
+                
+                // Toggle repository content on header click
+                repoHeader.addEventListener('click', () => {
+                    repoElement.classList.toggle('expanded');
+                });
+                
+                repoElement.appendChild(repoHeader);
+                repoElement.appendChild(repoContent);
+                fileTree.appendChild(repoElement);
+            });
+            
+            // Update the included count with token information
+            includedCount.textContent = `${getTotalIncludedFileCount()} files · ~${formatTokenCount(totalTokenCount)} tokens`;
+            
+            // Apply search filter if search input has value
+            applySearchFilter();
+        }
+        
+        // Get total included file count
+        function getTotalIncludedFileCount() {
+            let count = 0;
+            selectedRepos.forEach(repo => {
+                count += repo.included.length;
+            });
+            return count;
+        }
+        
+        // Render directory
+        function renderDirectory(directory, repoName) {
+            const dirElement = document.createElement('div');
+            dirElement.classList.add('tree-directory');
+            dirElement.dataset.name = directory.name;
+            
+            // Directory header
+            const dirHeader = document.createElement('div');
+            dirHeader.classList.add('tree-directory-header');
+            dirHeader.innerHTML = `
+                <div class="tree-directory-name">
+                    <span class="tree-directory-icon">▶</span>
+                    <span>📂 ${directory.name}</span>
+                </div>
+                <div class="tree-directory-stats">
+                    <span class="tree-directory-file-count">${directory.fileCount} files</span>
+                    <span class="tree-directory-token-count">~${formatTokenCount(directory.tokenCount)} tokens</span>
+                </div>
+            `;
+            
+            // Directory content
+            const dirContent = document.createElement('div');
+            dirContent.classList.add('tree-directory-content');
+            
+            // Add directory children (subdirectories and files)
+            const sortedChildren = Object.values(directory.children)
+                .sort((a, b) => {
+                    // Directories first, then files
+                    if (a.type !== b.type) {
+                        return a.type === 'directory' ? -1 : 1;
+                    }
+                    // Alphabetical within same type
+                    return a.name.localeCompare(b.name);
+                });
+            
+            sortedChildren.forEach(child => {
+                if (child.type === 'directory') {
+                    dirContent.appendChild(renderDirectory(child, repoName));
+                } else {
+                    dirContent.appendChild(renderFile(child, repoName));
+                }
+            });
+            
+            // Toggle directory expansion on click
+            dirHeader.addEventListener('click', (e) => {
+                e.stopPropagation();
+                dirElement.classList.toggle('expanded');
+            });
+            
+            dirElement.appendChild(dirHeader);
+            dirElement.appendChild(dirContent);
+            return dirElement;
+        }
+        
+        // Render file
+        function renderFile(file, repoName) {
+            const fileElement = document.createElement('div');
+            fileElement.classList.add('tree-file');
+            if (file.extension) {
+                fileElement.classList.add(file.extension.toLowerCase());
+            }
+            fileElement.dataset.name = file.name;
+            fileElement.dataset.path = file.path;
+            fileElement.dataset.repo = repoName;
+            fileElement.dataset.tokens = file.tokenCount;
+            
+            // File name parts
+            const nameParts = file.name.split('.');
+            const baseName = nameParts.length > 1 ? nameParts.slice(0, -1).join('.') : nameParts[0];
+            const extension = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+            
+            // File icon
+            const fileIcon = getFileIcon(file.extension || '');
+            
+            fileElement.innerHTML = `
+                <span class="tree-file-icon">${fileIcon}</span>
+                <span class="tree-file-name">${baseName}<span class="tree-file-ext">.${extension}</span></span>
+                <span class="tree-file-tokens">~${formatTokenCount(file.tokenCount)}</span>
+            `;
+            
+            // File click handler
+            fileElement.addEventListener('click', () => {
+                showFilePreview(file);
+            });
+            
+            return fileElement;
+        }
+        
+        // Show file preview
+        function showFilePreview(file) {
+            filePreviewFilename.textContent = `${file.name} (~${formatTokenCount(file.tokenCount)} tokens)`;
+            filePreviewCode.textContent = file.content;
+            filePreviewModal.classList.add('visible');
+        }
+        
+        // Close file preview
+        function closeFilePreview() {
+            filePreviewModal.classList.remove('visible');
+        }
+        
+        // Search file tree
+        function searchFileTree(query) {
+            if (!query) {
+                // Clear search
+                resetTreeSearch();
+                return;
+            }
+            
+            const lowerQuery = query.toLowerCase();
+            let foundAny = false;
+            
+            // Search in each repo
+            const repoElements = fileTree.querySelectorAll('.tree-repo');
+            repoElements.forEach(repoEl => {
+                let foundInRepo = false;
+                
+                // Search files in this repo
+                const fileElements = repoEl.querySelectorAll('.tree-file');
+                fileElements.forEach(fileEl => {
+                    const fileName = fileEl.dataset.name.toLowerCase();
+                    const filePath = fileEl.dataset.path.toLowerCase();
+                    
+                    if (fileName.includes(lowerQuery) || filePath.includes(lowerQuery)) {
+                        fileEl.style.display = 'flex';
+                        highlightMatch(fileEl, lowerQuery);
+                        foundInRepo = true;
+                        foundAny = true;
+                        
+                        // Make sure parent directories are expanded and visible
+                        let parent = fileEl.parentElement;
+                        while (parent && !parent.classList.contains('tree-repo-content')) {
+                            if (parent.classList.contains('tree-directory-content')) {
+                                parent.parentElement.classList.add('expanded');
+                                parent.style.display = 'block';
+                            }
+                            parent = parent.parentElement;
+                        }
+                    } else {
+                        fileEl.style.display = 'none';
+                    }
+                });
+                
+                // Search directories
+                const dirElements = repoEl.querySelectorAll('.tree-directory');
+                dirElements.forEach(dirEl => {
+                    const dirName = dirEl.dataset.name.toLowerCase();
+                    const hasVisibleChildren = dirEl.querySelector('.tree-file[style*="display: flex"]');
+                    
+                    if (dirName.includes(lowerQuery)) {
+                        // Highlight the directory name and make it visible
+                        const nameElement = dirEl.querySelector('.tree-directory-name span:last-child');
+                        nameElement.innerHTML = nameElement.textContent.replace(
+                            new RegExp(lowerQuery, 'ig'),
+                            match => `<span class="match-highlight">${match}</span>`
+                        );
+                        
+                        // Show and expand the directory
+                        dirEl.style.display = 'block';
+                        dirEl.classList.add('expanded');
+                        foundInRepo = true;
+                        foundAny = true;
+                        
+                        // Make parent directories visible and expanded
+                        let parent = dirEl.parentElement;
+                        while (parent && !parent.classList.contains('tree-repo-content')) {
+                            if (parent.classList.contains('tree-directory-content')) {
+                                parent.parentElement.classList.add('expanded');
+                                parent.style.display = 'block';
+                            }
+                            parent = parent.parentElement;
+                        }
+                    } else if (hasVisibleChildren) {
+                        // Directory has matching files, keep it visible and expanded
+                        dirEl.style.display = 'block';
+                        dirEl.classList.add('expanded');
+                    } else if (!hasVisibleChildren && !dirName.includes(lowerQuery)) {
+                        // Hide the directory if it neither matches nor has matching children
+                        dirEl.style.display = 'none';
+                    }
+                });
+                
+                // Show/hide the entire repo based on matches
+                if (foundInRepo) {
+                    repoEl.style.display = 'block';
+                    repoEl.classList.add('expanded');
+                } else {
+                    repoEl.style.display = 'none';
+                }
+            });
+            
+            // Show no results message if nothing found
+            if (!foundAny) {
+                if (!fileTree.querySelector('.tree-empty')) {
+                    const emptyMessage = document.createElement('div');
+                    emptyMessage.classList.add('tree-empty');
+                    emptyMessage.innerHTML = `
+                        <div class="tree-empty-icon">🔍</div>
+                        <p>No files match your search</p>
+                    `;
+                    fileTree.appendChild(emptyMessage);
+                }
+            } else {
+                const emptyMessage = fileTree.querySelector('.tree-empty');
+                if (emptyMessage) {
+                    emptyMessage.remove();
+                }
+            }
+        }
+        
+        // Highlight search matches
+        function highlightMatch(element, query) {
+            // Highlight in the file name
+            const nameElement = element.querySelector('.tree-file-name');
+            const originalText = nameElement.textContent;
+            
+            // Only replace in the text nodes to avoid messing up the extension styling
+            const textNode = Array.from(nameElement.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
+            const extNode = nameElement.querySelector('.tree-file-ext');
+            
+            if (textNode && originalText.toLowerCase().includes(query)) {
+                const baseName = textNode.textContent;
+                textNode.textContent = '';
+                
+                // Create a new span with highlighted text
+                const newSpan = document.createElement('span');
+                newSpan.innerHTML = baseName.replace(
+                    new RegExp(query, 'ig'),
+                    match => `<span class="match-highlight">${match}</span>`
+                );
+                
+                // Insert the highlighted text before the extension
+                nameElement.insertBefore(newSpan, extNode);
+            }
+            
+            // Also check if the extension contains the query
+            if (extNode && extNode.textContent.toLowerCase().includes(query)) {
+                extNode.innerHTML = extNode.textContent.replace(
+                    new RegExp(query, 'ig'),
+                    match => `<span class="match-highlight">${match}</span>`
+                );
+            }
+        }
+        
+        // Reset tree search
+        function resetTreeSearch() {
+            // Show all elements
+            const allRepos = fileTree.querySelectorAll('.tree-repo');
+            const allDirs = fileTree.querySelectorAll('.tree-directory');
+            const allFiles = fileTree.querySelectorAll('.tree-file');
+            
+            allRepos.forEach(el => {
+                el.style.display = 'block';
+                el.classList.remove('expanded');
+            });
+            
+            allDirs.forEach(el => {
+                el.style.display = 'block';
+                el.classList.remove('expanded');
+            });
+            
+            allFiles.forEach(el => {
+                el.style.display = 'flex';
+                
+                // Remove highlights
+                const nameElement = el.querySelector('.tree-file-name');
+                if (nameElement) {
+                    nameElement.innerHTML = `${nameElement.textContent.split('.')[0]}<span class="tree-file-ext">.${nameElement.textContent.split('.')[1] || ''}</span>`;
+                }
+            });
+            
+            // Remove empty message if present
+            const emptyMessage = fileTree.querySelector('.tree-empty');
+            if (emptyMessage) {
+                emptyMessage.remove();
+            }
+            
+            // Re-expand first level directories if needed
+            renderFileTree();
+        }
+        
+        // Apply current search filter
+        function applySearchFilter() {
+            const query = treeSearchInput.value.trim();
+            if (query) {
+                searchFileTree(query);
+            }
+        }
+        
         // Update file summary UI
         function updateFileSummary() {
             // Calculate total files
             let totalIncludedFiles = 0;
             let totalIgnoredFiles = 0;
-            let totalFiles = [];
+            totalTokenCount = 0;
             
             selectedRepos.forEach(repo => {
                 totalIncludedFiles += repo.included.length;
                 totalIgnoredFiles += repo.ignored.length;
                 
-                // Collect all included files for display
-                repo.included.forEach(file => {
-                    totalFiles.push({
-                        repo: repo.name,
-                        path: file.path,
-                        content: file.content
-                    });
-                });
+                // Find the corresponding repo in fileTreeData to get token count
+                const repoData = fileTreeData.find(r => r.name === repo.name);
+                if (repoData) {
+                    totalTokenCount += repoData.tokenCount;
+                }
             });
             
             // Update counts
-            includedCount.textContent = `${totalIncludedFiles} files`;
+            includedCount.textContent = `${totalIncludedFiles} files · ~${formatTokenCount(totalTokenCount)} tokens`;
             ignoredCount.textContent = `${totalIgnoredFiles} files`;
             selectedReposCount.textContent = selectedRepos.length;
-            
-            // Show included files
-            includedFiles.innerHTML = '';
-            totalFiles.forEach(file => {
-                const fileItem = document.createElement('div');
-                fileItem.classList.add('file-item');
-                fileItem.innerHTML = `<span class="file-path">${file.repo}: ${file.path}</span>`;
-                includedFiles.appendChild(fileItem);
-            });
             
             // Show the selected repos section
             selectedReposSummary.classList.remove('hidden');
@@ -340,34 +938,20 @@
             updateSelectedReposList();
         }
         
-        // Add repository to selected list
-        function addToSelectedRepos(repo) {
-            // Check if repo is already in the list
-            const exists = selectedRepos.some(r => r.path === repo.path);
-            if (!exists) {
-                selectedRepos.push(repo);
-                
-                // Update the selected repos count
-                selectedReposCount.textContent = selectedRepos.length;
-                
-                // Show the selected repos section
-                selectedReposSummary.classList.remove('hidden');
-                
-                // Update the selected repos list
-                updateSelectedReposList();
-            }
-        }
-        
         // Update the list of selected repositories
         function updateSelectedReposList() {
             selectedReposList.innerHTML = '';
             
             selectedRepos.forEach(repo => {
+                // Find the corresponding repo in fileTreeData to get token count
+                const repoData = fileTreeData.find(r => r.name === repo.name);
+                const tokenCount = repoData ? repoData.tokenCount : 0;
+                
                 const repoItem = document.createElement('div');
                 repoItem.classList.add('repo-item');
                 repoItem.innerHTML = `
                     <span class="repo-name">📂 ${repo.name}</span>
-                    <span class="repo-files">${repo.included.length} files</span>
+                    <span class="repo-files">${repo.included.length} files · ~${formatTokenCount(tokenCount)} tokens</span>
                 `;
                 selectedReposList.appendChild(repoItem);
             });
@@ -445,6 +1029,7 @@
             let refreshedCount = 0;
             const tempSelectedRepos = [...selectedRepos];
             selectedRepos = [];
+            fileTreeData = [];
             
             // Process each repository
             tempSelectedRepos.forEach((repo, index) => {
@@ -462,6 +1047,10 @@
                             // Add to selected repos
                             selectedRepos.push(updatedRepo);
                             
+                            // Convert to tree structure
+                            const repoTreeData = buildFileTree(updatedRepo.included, updatedRepo.name);
+                            fileTreeData.push(repoTreeData);
+                            
                             // Update progress
                             refreshedCount++;
                             
@@ -472,6 +1061,7 @@
                                 
                                 // Update UI
                                 updateFileSummary();
+                                renderFileTree();
                                 
                                 // Enable buttons
                                 refreshButton.disabled = false;
@@ -494,6 +1084,7 @@
                                 loadingIndicator.remove();
                                 refreshButton.disabled = false;
                                 copyButton.disabled = false;
+                                renderFileTree();
                             }
                         });
                 }, index * 300); // Stagger requests to avoid overwhelming the server
@@ -589,6 +1180,26 @@
         copyButton.addEventListener('click', copyToClipboard);
         refreshButton.addEventListener('click', refreshRepositoryFiles);
         backToSelectButton.addEventListener('click', backToRepoSelect);
+        
+        // File preview events
+        filePreviewClose.addEventListener('click', closeFilePreview);
+        filePreviewModal.addEventListener('click', (e) => {
+            if (e.target === filePreviewModal) {
+                closeFilePreview();
+            }
+        });
+        
+        // Search events
+        treeSearchInput.addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+            searchFileTree(query);
+        });
+        
+        treeSearchClear.addEventListener('click', () => {
+            treeSearchInput.value = '';
+            resetTreeSearch();
+        });
+        
         notificationClose.addEventListener('click', () => {
             notification.classList.add('hidden');
         });
