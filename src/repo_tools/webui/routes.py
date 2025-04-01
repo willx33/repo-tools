@@ -11,6 +11,7 @@ from repo_tools.utils.git import find_git_repos, get_repo_name
 from repo_tools.utils.clipboard import copy_to_clipboard
 from repo_tools.utils.notifications import show_toast
 from repo_tools.modules import process_repository_files, extract_github_repo_url, clone_github_repo
+from repo_tools.modules import process_xml_changes, preview_xml_changes, XMLParserError
 
 # Routes
 @app.route('/')
@@ -27,6 +28,11 @@ def local_repo():
 def github_repo():
     """Render the GitHub repo context copier page."""
     return render_template('github_repo.html')
+
+@app.route('/xml-parser')
+def xml_parser():
+    """Render the XML parser page."""
+    return render_template('xml_parser.html')
     
 @app.route('/settings')
 def settings():
@@ -183,6 +189,114 @@ def copy_repo_content():
     
     return jsonify({"error": "No repositories provided"}), 400
 
+@app.route('/api/copy-file-to-clipboard', methods=['POST'])
+def copy_file_content():
+    """Copy a single file's content to clipboard."""
+    data = request.json
+    file_path = data.get('filePath')
+    file_content = data.get('fileContent')
+    repo_name = data.get('repoName', '')
+    
+    if not file_path or not file_content:
+        return jsonify({"error": "File path or content not provided"}), 400
+    
+    # Format content for clipboard
+    formatted_content = ""
+    if repo_name:
+        formatted_content += f"REPOSITORY: {repo_name}\n"
+        formatted_content += f"{'=' * 80}\n\n"
+    
+    formatted_content += f"{file_path}:\n{file_content}\n"
+    
+    # Copy to clipboard
+    copy_to_clipboard(formatted_content)
+    
+    # Show toast notification
+    show_toast(f"File copied to clipboard: {os.path.basename(file_path)}")
+    
+    return jsonify({"success": True, "message": f"Copied {file_path} to clipboard"})
+
+@app.route('/api/parse-xml', methods=['POST'])
+def parse_xml():
+    """Parse XML and return preview of changes."""
+    data = request.json
+    xml_string = data.get('xml')
+    repo_path = data.get('repoPath')
+    
+    if not xml_string:
+        return jsonify({"error": "No XML content provided"}), 400
+    
+    if not repo_path:
+        return jsonify({"error": "No repository path provided"}), 400
+    
+    try:
+        # Generate preview of changes
+        previews = preview_xml_changes(xml_string, repo_path)
+        
+        return jsonify({
+            "success": True,
+            "changes": previews,
+            "changeCount": len(previews)
+        })
+    
+    except XMLParserError as e:
+        return jsonify({"error": f"XML parsing error: {str(e)}"}), 400
+    
+    except Exception as e:
+        return jsonify({"error": f"Error previewing changes: {str(e)}"}), 500
+
+@app.route('/api/apply-xml', methods=['POST'])
+def apply_xml():
+    """Apply XML changes to a repository."""
+    data = request.json
+    xml_string = data.get('xml')
+    repo_path = data.get('repoPath')
+    
+    if not xml_string:
+        return jsonify({"error": "No XML content provided"}), 400
+    
+    if not repo_path:
+        return jsonify({"error": "No repository path provided"}), 400
+    
+    try:
+        # Apply changes and get results
+        results = process_xml_changes(xml_string, repo_path)
+        
+        # Format results for response
+        formatted_results = []
+        successful_changes = 0
+        
+        for change, success, error_message in results:
+            result = {
+                "operation": change.operation,
+                "path": change.path,
+                "success": success
+            }
+            
+            if error_message:
+                result["error"] = error_message
+            
+            if success:
+                successful_changes += 1
+            
+            formatted_results.append(result)
+        
+        # Show toast notification
+        show_toast(f"Applied {successful_changes} of {len(results)} changes to repository")
+        
+        return jsonify({
+            "success": True,
+            "results": formatted_results,
+            "totalChanges": len(results),
+            "successfulChanges": successful_changes
+        })
+    
+    except XMLParserError as e:
+        return jsonify({"error": f"XML parsing error: {str(e)}"}), 400
+    
+    except Exception as e:
+        return jsonify({"error": f"Error applying changes: {str(e)}"}), 500
+
 # Socket.IO Events
 @socketio.on('connect')
 def handle_connect():
@@ -282,6 +396,126 @@ def handle_github_clone(data):
     except Exception as e:
         emit('github_error', {'message': f'Error processing repository: {str(e)}'})
         return
+
+@socketio.on('github_scan')
+def handle_github_scan(data):
+    """Handle GitHub repo scanning via WebSockets."""
+    repo_path = data.get('repoPath')
+    if not repo_path:
+        emit('github_error', {'message': 'No repository path provided'})
+        return
+    
+    emit('github_scan_start', {'path': repo_path})
+    
+    try:
+        # Process repository files using the API layer
+        files_with_content, ignored_files = process_repository_files(repo_path)
+        
+        # Format response
+        included_files = []
+        for file_path, content in files_with_content:
+            included_files.append({
+                "path": str(file_path),
+                "content": content
+            })
+        
+        ignored_files_list = [str(f) for f in ignored_files]
+        
+        emit('github_scan_complete', {
+            "included": included_files,
+            "ignored": ignored_files_list,
+            "includedCount": len(included_files),
+            "ignoredCount": len(ignored_files_list)
+        })
+    except Exception as e:
+        emit('github_error', {'message': f"Error scanning repository: {str(e)}"})
+
+@socketio.on('xml_parse')
+def handle_xml_parse(data):
+    """Handle XML parsing via WebSockets."""
+    xml_string = data.get('xml')
+    repo_path = data.get('repoPath')
+    
+    if not xml_string:
+        emit('xml_error', {'message': 'No XML content provided'})
+        return
+    
+    if not repo_path:
+        emit('xml_error', {'message': 'No repository path provided'})
+        return
+    
+    emit('xml_parse_start', {'repoPath': repo_path})
+    
+    try:
+        # Generate preview of changes
+        previews = preview_xml_changes(xml_string, repo_path)
+        
+        emit('xml_parse_complete', {
+            "success": True,
+            "changes": previews,
+            "changeCount": len(previews)
+        })
+    
+    except XMLParserError as e:
+        emit('xml_error', {'message': f"XML parsing error: {str(e)}"})
+    
+    except Exception as e:
+        emit('xml_error', {'message': f"Error previewing changes: {str(e)}"})
+
+@socketio.on('xml_apply')
+def handle_xml_apply(data):
+    """Handle applying XML changes via WebSockets."""
+    xml_string = data.get('xml')
+    repo_path = data.get('repoPath')
+    
+    if not xml_string:
+        emit('xml_error', {'message': 'No XML content provided'})
+        return
+    
+    if not repo_path:
+        emit('xml_error', {'message': 'No repository path provided'})
+        return
+    
+    emit('xml_apply_start', {'repoPath': repo_path})
+    
+    try:
+        # Apply changes and get results
+        results = process_xml_changes(xml_string, repo_path)
+        
+        # Format results for response
+        formatted_results = []
+        successful_changes = 0
+        
+        for change, success, error_message in results:
+            result = {
+                "operation": change.operation,
+                "path": change.path,
+                "success": success
+            }
+            
+            if error_message:
+                result["error"] = error_message
+            
+            if success:
+                successful_changes += 1
+            
+            formatted_results.append(result)
+        
+        # Show toast notification
+        show_toast(f"Applied {successful_changes} of {len(results)} changes to repository")
+        
+        emit('xml_apply_complete', {
+            "success": True,
+            "results": formatted_results,
+            "totalChanges": len(results),
+            "successfulChanges": successful_changes
+        })
+    
+    except XMLParserError as e:
+        emit('xml_error', {'message': f"XML parsing error: {str(e)}"})
+    
+    except Exception as e:
+        emit('xml_error', {'message': f"Error applying changes: {str(e)}"})
 
 # Error handlers
 @app.errorhandler(404)

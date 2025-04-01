@@ -7,6 +7,7 @@ to access the core functionality of repo tools.
 # Re-export the public APIs that can be used by both CLI and WebUI
 from repo_tools.modules.context_copier import repo_context_copier
 from repo_tools.modules.github_context_copier import github_repo_context_copier, extract_github_repo_url, clone_github_repo
+from repo_tools.modules.xml_parser import parse_xml_string, apply_changes, preview_changes, XMLParserError
 
 # Define a version to track API compatibility
 __api_version__ = '1.0.0'
@@ -60,3 +61,39 @@ def process_repository_files(repo_path):
     """
     from repo_tools.utils.git import get_relevant_files_with_content
     return get_relevant_files_with_content(repo_path)
+
+def process_xml_changes(xml_string, repo_path):
+    """
+    Parse XML content and apply changes to a repository.
+    
+    Args:
+        xml_string: The XML string to parse
+        repo_path: Path to the target repository
+        
+    Returns:
+        A list of tuples containing the file changes, success status, and error messages (if any)
+    
+    Raises:
+        XMLParserError: If the XML string is invalid or cannot be parsed
+    """
+    from repo_tools.modules.xml_parser import parse_xml_string, apply_changes
+    changes = parse_xml_string(xml_string)
+    return apply_changes(changes, repo_path)
+
+def preview_xml_changes(xml_string, repo_path):
+    """
+    Parse XML content and generate a preview of changes.
+    
+    Args:
+        xml_string: The XML string to parse
+        repo_path: Path to the target repository
+        
+    Returns:
+        A list of dictionaries with preview information
+    
+    Raises:
+        XMLParserError: If the XML string is invalid or cannot be parsed
+    """
+    from repo_tools.modules.xml_parser import parse_xml_string, preview_changes
+    changes = parse_xml_string(xml_string)
+    return preview_changes(changes, repo_path)

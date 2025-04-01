@@ -21,6 +21,9 @@ dependencies = [
     "pathspec>=0.11.0",
     "pyperclip>=1.8.2",
     "rich>=13.0.0",
+    "flask>=2.0.0",
+    "flask-socketio>=5.0.0",
+    "eventlet>=0.33.0",
 ]
 
 [project.scripts]
