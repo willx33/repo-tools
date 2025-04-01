@@ -1,124 +1,77 @@
 # Repo Tools
 
-A collection of tools to streamline AI-assisted development workflows.
+A collection of tools I made to streamline my AI-assisted dev workflows.
 
-## Features
+## What it does
 
-- **Local Repo Code Context Copier**: Copies relevant code context from local git repos to your clipboard for use with AI assistants.
-- **GitHub Repo Code Context Copier**: Extracts and copies code context from GitHub repositories by URL (no local clone needed beforehand).
-- **WebUI Interface**: Access all functionality through a modern web interface that runs alongside the CLI.
+- **Copy code from local repos** - Grabs context from local git repos, respecting gitignores
+- **Copy code from GitHub repos** - Extracts code from GitHub URLs without cloning
+- **WebUI Interface** - Modern web interface that's actually nice to use
 
-## Installation
+## Install it
 
-### Option 1: Using requirements.txt (simpler)
 ```bash
-# Clone the repository
+# Clone & cd into the repo
 git clone [your-repo-url]
-cd ai-workflow
+cd repo-tools
 
-# Create and activate a virtual environment (optional but recommended)
+# Venv is always a good idea
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Install in development mode
+# Install in dev mode
 pip install -e .
 ```
 
-> **Note**: The WebUI requires Flask and Flask-SocketIO, which are included in the requirements.txt file. These will be installed automatically when you run the commands above.
+## Use it
 
-### Option 2: Using pyproject.toml
-```bash
-# Clone the repository
-git clone [your-repo-url]
-cd ai-workflow
-
-# Create and activate a virtual environment (optional but recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install in development mode (will install dependencies automatically)
-pip install -e .
-```
-
-## Usage
-
-Run the tool with:
+Run it one of two ways:
 
 ```bash
+# Full CLI with menu
 repo-tools
+
+# Jump straight to the WebUI
+repo-web
 ```
 
-Use arrow keys to navigate through the menu, and Enter to select an option.
+The WebUI has these cool features:
+- Dark mode (obviously)
+- Search and sort repos/files
+- Copy individual files or whole directories 
+- Collapsible file trees
+- Shows token counts for LLM context limits
 
-### WebUI Interface
+## Local Repo Copier
 
-The tool includes a modern web interface that provides the same functionality as the CLI:
+This grabs code from your local repos:
 
-1. Select "Start WebUI" from the main menu
-2. The web interface will open automatically in your default browser at `http://127.0.0.1:5000/`
-3. You can continue using the CLI while the web interface is running
-4. Navigate between tabs to access different tools
-5. Use the "Refresh Repository Files" button to update any selected repositories with the latest changes
-6. When you exit the CLI, the web interface will also shut down automatically
+1. Choose a repo from the list
+2. Select files you want (or let it handle things automatically)
+3. Click "Copy Selected" or copy individual files
+4. Paste directly to your AI assistant
 
-The WebUI uses a dark theme and provides a more visual way to interact with the tools, particularly helpful for visualizing file selections.
+## GitHub Repo Copier
 
-### Local Repo Code Context Copier
+Same deal but for GitHub repos:
 
-This tool helps you copy code context from a local git repository to your clipboard, respecting .gitignore rules. Perfect for providing context to AI assistants.
+1. Paste a GitHub URL
+2. Select what you need
+3. Copy & paste to your AI
 
-1. Select "Local Repo Code Context Copier" from the main menu
-2. Choose a directory path to scan for repositories (paths from current directory up to the root will be shown)
-3. Select a repository from the discovered list
-4. The content will be copied to your clipboard with the following format:
-   ```
-   /absolute/path/to/file.ext:
-   file content here...
-   ```
-5. A toast notification will confirm when the copy is complete
-6. You'll be returned to the repository selection menu where you can select another repository
-7. After selecting repositories, use the "Refresh repository files" option to update any repositories with the latest changes
+## Command Line Options
 
-### GitHub Repo Code Context Copier
+If you're running the WebUI directly with `repo-web`:
 
-This tool fetches code context from GitHub repositories directly via their URL and copies it to your clipboard.
+```bash
+# Run in debug mode
+repo-web --debug
 
-1. Select "GitHub Repo Code Context Copier" from the main menu
-2. Enter a GitHub repository URL (the tool can extract the repo URL even if you provide a longer URL with additional paths)
-3. The tool will clone the repository to a temporary directory and analyze its files
-4. The content will be copied to your clipboard with the following format:
-   ```
-   path/to/file.ext:
-   file content here...
-   ```
-5. A toast notification will confirm when the copy is complete
-6. You can choose to add another repository or return to the main menu
-7. Use the "Refresh repository files" option to update any repositories with the latest changes from GitHub
+# Don't auto-open the browser
+repo-web --no-browser
 
-## WebUI Architecture
+# Run in the background
+repo-web --background
+```
 
-The WebUI component uses the following architecture:
-
-- **Backend**: Flask and Flask-SocketIO
-- **Frontend**: Pure HTML, CSS, and JavaScript (no frontend frameworks required)
-- **Communication**: RESTful API endpoints + real-time WebSocket for long-running tasks
-- **Threading**: The WebUI runs in a background thread, allowing the CLI to remain fully functional
-
-### Key Components:
-
-1. **Flask Server**: Handles HTTP requests and renders the HTML templates
-2. **SocketIO**: Provides real-time communication for tasks like repository scanning
-3. **Background Thread**: Ensures the web interface doesn't block the CLI
-4. **Daemon Thread**: Automatically shuts down when the main program exits
-
-### Design Principles:
-
-- **Non-intrusive**: The WebUI runs alongside the CLI without affecting its functionality
-- **Modern UI**: Dark theme with a clean, minimalist interface
-- **Responsive**: Works on various screen sizes
-- **Feature Parity**: Provides the same functionality as the CLI but with a visual interface
-
-The WebUI is entirely self-contained within the application - no external services or databases are required. It's designed to spin up instantly when selected from the menu and shut down cleanly when the program exits.
+That's it! Made by me with ❤️

@@ -41,6 +41,23 @@
             </div>
         </div>
         
+        <!-- Repository search and sort controls -->
+        <div class="repo-controls">
+            <div class="repo-search">
+                <span class="repo-search-icon">🔍</span>
+                <input type="text" id="repo-search-input" class="repo-search-input" placeholder="Search repositories...">
+                <button id="repo-search-clear" class="repo-search-clear">×</button>
+            </div>
+            <div class="repo-sort">
+                <label for="repo-sort-select">Sort by:</label>
+                <select id="repo-sort-select" class="select-dark">
+                    <option value="default">Default</option>
+                    <option value="name-asc">Name (A-Z)</option>
+                    <option value="name-desc">Name (Z-A)</option>
+                </select>
+            </div>
+        </div>
+        
         <div class="form-group">
             <label>Select one or more repositories:</label>
             <div id="repo-checklist" class="repo-checklist">
@@ -77,11 +94,23 @@
             
             <!-- Included Files Content -->
             <div class="included-content">
-                <!-- File Tree Search -->
-                <div class="tree-search">
-                    <span class="tree-search-icon">🔍</span>
-                    <input type="text" id="tree-search-input" class="tree-search-input" placeholder="Search files...">
-                    <button id="tree-search-clear" class="tree-search-clear">×</button>
+                <!-- File Tree Search and Sort -->
+                <div class="tree-controls">
+                    <div class="tree-search">
+                        <span class="tree-search-icon">🔍</span>
+                        <input type="text" id="tree-search-input" class="tree-search-input" placeholder="Search files...">
+                        <button id="tree-search-clear" class="tree-search-clear">×</button>
+                    </div>
+                    <div class="tree-sort">
+                        <label for="tree-sort-select">Sort by:</label>
+                        <select id="tree-sort-select" class="select-dark">
+                            <option value="default">Default</option>
+                            <option value="name-asc">Name (A-Z)</option>
+                            <option value="name-desc">Name (Z-A)</option>
+                            <option value="tokens-desc">Tokens (High to Low)</option>
+                            <option value="tokens-asc">Tokens (Low to High)</option>
+                        </select>
+                    </div>
                 </div>
                 
                 <!-- New File Tree View -->
@@ -106,10 +135,20 @@
             <!-- Collapsed content -->
             <div class="ignored-content hidden">
                 <!-- Ignored Files Tree Search -->
-                <div class="tree-search">
-                    <span class="tree-search-icon">🔍</span>
-                    <input type="text" id="ignored-tree-search-input" class="tree-search-input" placeholder="Search ignored files...">
-                    <button id="ignored-tree-search-clear" class="tree-search-clear">×</button>
+                <div class="tree-controls">
+                    <div class="tree-search">
+                        <span class="tree-search-icon">🔍</span>
+                        <input type="text" id="ignored-tree-search-input" class="tree-search-input" placeholder="Search ignored files...">
+                        <button id="ignored-tree-search-clear" class="tree-search-clear">×</button>
+                    </div>
+                    <div class="tree-sort">
+                        <label for="ignored-tree-sort-select">Sort by:</label>
+                        <select id="ignored-tree-sort-select" class="select-dark">
+                            <option value="default">Default</option>
+                            <option value="name-asc">Name (A-Z)</option>
+                            <option value="name-desc">Name (Z-A)</option>
+                        </select>
+                    </div>
                 </div>
                 
                 <!-- Ignored Files Tree View -->
@@ -124,10 +163,16 @@
         </div>
         
         <div class="action-buttons">
-            <!-- Add token count display above button -->
-            <div class="total-tokens-display">
-                <span>Total tokens to be copied: </span>
-                <span id="total-tokens-count" class="token-count-badge">0</span>
+            <!-- Add summary stats display above buttons -->
+            <div class="copy-summary-stats">
+                <div class="stats-item">
+                    <span class="stats-label">Files:</span>
+                    <span id="total-files-count" class="stats-value">0</span>
+                </div>
+                <div class="stats-item">
+                    <span class="stats-label">Tokens:</span>
+                    <span id="total-tokens-count" class="stats-value">0</span>
+                </div>
             </div>
             <button id="copy-button" class="btn btn-primary">📋 Copy to Clipboard</button>
             <button id="refresh-button" class="btn btn-info">🔄 Refresh Files</button>
@@ -186,6 +231,11 @@
         const repoSelectSummary = document.getElementById('repo-select-summary');
         const repoSelectList = document.getElementById('repo-select-list');
         
+        // Repository search and sort elements
+        const repoSearchInput = document.getElementById('repo-search-input');
+        const repoSearchClear = document.getElementById('repo-search-clear');
+        const repoSortSelect = document.getElementById('repo-sort-select');
+        
         const stepFileSummary = document.getElementById('step-file-summary');
         const includedCount = document.getElementById('included-count');
         const fileTree = document.getElementById('file-tree');
@@ -209,6 +259,10 @@
         const treeSearchClear = document.getElementById('tree-search-clear');
         const ignoredTreeSearchInput = document.getElementById('ignored-tree-search-input');
         const ignoredTreeSearchClear = document.getElementById('ignored-tree-search-clear');
+        
+        // File tree sorting
+        const treeSortSelect = document.getElementById('tree-sort-select');
+        const ignoredTreeSortSelect = document.getElementById('ignored-tree-sort-select');
         
         // File preview modal
         const filePreviewModal = document.getElementById('file-preview-modal');
@@ -818,15 +872,29 @@
                 repoContent.classList.add('tree-repo-content');
                 repoContent.classList.add('hidden'); // Initially hidden
                 
-                // Add repository children (directories and files)
+                // Get all top-level children (files and directories)
                 const sortedChildren = Object.values(repo.children)
                     .sort((a, b) => {
-                        // Directories first, then files
-                        if (a.type !== b.type) {
-                            return a.type === 'directory' ? -1 : 1;
+                        // Apply sorting based on the selected option
+                        const sortOption = treeSortSelect.value;
+                        
+                        switch (sortOption) {
+                            case 'name-asc':
+                                return a.name.localeCompare(b.name);
+                            case 'name-desc':
+                                return b.name.localeCompare(a.name);
+                            case 'tokens-desc':
+                                return b.tokenCount - a.tokenCount;
+                            case 'tokens-asc':
+                                return a.tokenCount - b.tokenCount;
+                            case 'default':
+                            default:
+                                // Default sorting: directories first, then files alphabetically
+                                if (a.type !== b.type) {
+                                    return a.type === 'directory' ? -1 : 1;
+                                }
+                                return a.name.localeCompare(b.name);
                         }
-                        // Alphabetical within same type
-                        return a.name.localeCompare(b.name);
                     });
                 
                 sortedChildren.forEach(child => {
@@ -862,6 +930,13 @@
                         dir.classList.remove('expanded');
                         dir.querySelector('.tree-directory-icon').textContent = '▶';
                     });
+                });
+                
+                // Add copy repository button functionality
+                const copyRepoBtn = repoHeader.querySelector('.copy-repo');
+                copyRepoBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    copyRepoContents(repo);
                 });
                 
                 // Toggle repository content on header click
@@ -992,6 +1067,7 @@
                         ${repo.fileCount} files
                     </div>
                     <div class="tree-repo-actions">
+                        <button class="tree-action-button copy-repo">Copy Selected</button>
                         <button class="tree-action-button expand-all">Expand All</button>
                         <button class="tree-action-button collapse-all">Collapse All</button>
                     </div>
@@ -1008,15 +1084,25 @@
                 repoContent.classList.add('tree-repo-content');
                 repoContent.classList.add('hidden'); // Initially hidden
                 
-                // Add repository children (directories and files)
+                // Get all top-level children
                 const sortedChildren = Object.values(repo.children)
                     .sort((a, b) => {
-                        // Directories first, then files
-                        if (a.type !== b.type) {
-                            return a.type === 'directory' ? -1 : 1;
+                        // Apply sorting based on the selected option
+                        const sortOption = ignoredTreeSortSelect.value;
+                        
+                        switch (sortOption) {
+                            case 'name-asc':
+                                return a.name.localeCompare(b.name);
+                            case 'name-desc':
+                                return b.name.localeCompare(a.name);
+                            case 'default':
+                            default:
+                                // Default sorting: directories first, then files alphabetically
+                                if (a.type !== b.type) {
+                                    return a.type === 'directory' ? -1 : 1;
+                                }
+                                return a.name.localeCompare(b.name);
                         }
-                        // Alphabetical within same type
-                        return a.name.localeCompare(b.name);
                     });
                 
                 sortedChildren.forEach(child => {
@@ -1052,6 +1138,14 @@
                         dir.classList.remove('expanded');
                         dir.querySelector('.tree-directory-icon').textContent = '▶';
                     });
+                });
+                
+                // Add copy repository button functionality
+                const copyRepoBtn = repoHeader.querySelector('.copy-repo');
+                copyRepoBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    // For ignored trees we need to use the ignored data
+                    copyRepoContents(repo, true);
                 });
                 
                 // Toggle repository content on header click
@@ -1430,16 +1524,6 @@
             const actionBtns = document.createElement('div');
             actionBtns.classList.add('tree-item-actions');
             
-            // Add copy button
-            const copyBtn = document.createElement('button');
-            copyBtn.classList.add('tree-action-icon', 'copy-btn');
-            copyBtn.title = "Copy file contents";
-            copyBtn.innerHTML = "📋";
-            copyBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                copyFileContents(file, repoName);
-            });
-            
             // Add preview button
             const previewBtn = document.createElement('button');
             previewBtn.classList.add('tree-action-icon', 'preview-btn');
@@ -1454,9 +1538,19 @@
                 }
             });
             
+            // Add copy button
+            const copyBtn = document.createElement('button');
+            copyBtn.classList.add('tree-action-icon', 'copy-btn');
+            copyBtn.title = "Copy file contents";
+            copyBtn.innerHTML = "📋";
+            copyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                copyFileContents(file, repoName);
+            });
+            
             // Add buttons to the actions container
-            actionBtns.appendChild(copyBtn);
             actionBtns.appendChild(previewBtn);
+            actionBtns.appendChild(copyBtn);
             
             // Create file element structure
             const fileContent = document.createElement('div');
@@ -2085,6 +2179,13 @@
             if (totalTokensCount) {
                 totalTokensCount.textContent = formatTokenCount(selectedTokenCount);
             }
+            
+            // Update total files count
+            const totalFilesCount = document.getElementById('total-files-count');
+            if (totalFilesCount) {
+                const totalSelectedFilesCount = totalSelectedFiles + totalSelectedIgnoredFiles;
+                totalFilesCount.textContent = totalSelectedFilesCount;
+            }
 
             // Show the selected repos section
             selectedReposSummary.classList.remove('hidden');
@@ -2132,6 +2233,13 @@
             const totalTokensCount = document.getElementById('total-tokens-count');
             if (totalTokensCount) {
                 totalTokensCount.textContent = formatTokenCount(selectedTokenCount);
+            }
+            
+            // Update total files count
+            const totalFilesCount = document.getElementById('total-files-count');
+            if (totalFilesCount) {
+                const totalSelectedFilesCount = totalSelectedFiles + totalSelectedIgnoredFiles;
+                totalFilesCount.textContent = totalSelectedFilesCount;
             }
 
             // Show the selected repos section
@@ -2525,6 +2633,7 @@
             const files = [];
             
             if (node.type === 'file') {
+                // Only add this file if it's selected
                 if (node.selected) {
                     files.push({
                         path: node.path,
@@ -2541,6 +2650,7 @@
                     return files;
                 }
                 
+                // Process each child recursively
                 Object.values(node.children).forEach(child => {
                     files.push(...getSelectedFiles(child));
                 });
@@ -2558,21 +2668,27 @@
                 const repoData = fileTreeData.find(r => r.name === repo.name);
                 const ignoredRepoData = ignoredTreeData.find(r => r.name === repo.name);
                 
-                const totalTokenCount = repoData ? repoData.tokenCount : 0;
-                const selectedTokenCount = repoData ? getSelectedTokenCount(repoData) : 0;
+                // Calculate included files stats
+                const includedTotal = repoData ? repoData.fileCount : 0;
+                const includedSelected = repoData ? getSelectedFileCount(repoData) : 0;
                 
-                // Count tokens from selected ignored files
-                const selectedIgnoredTokenCount = ignoredRepoData ? getSelectedTokenCount(ignoredRepoData) : 0;
+                // Calculate ignored files stats
+                const ignoredTotal = ignoredRepoData ? ignoredRepoData.fileCount : 0;
+                const ignoredSelected = ignoredRepoData ? getSelectedFileCount(ignoredRepoData) : 0;
                 
-                const totalFiles = (repoData ? repoData.fileCount : 0) + (ignoredRepoData ? ignoredRepoData.fileCount : 0);
-                const selectedFiles = (repoData ? getSelectedFileCount(repoData) : 0) + 
-                                      (ignoredRepoData ? getSelectedFileCount(ignoredRepoData) : 0);
+                // Calculate tokens
+                const selectedTokenCount = (repoData ? getSelectedTokenCount(repoData) : 0) + 
+                                          (ignoredRepoData ? getSelectedTokenCount(ignoredRepoData) : 0);
                 
                 const repoItem = document.createElement('div');
                 repoItem.classList.add('repo-item');
                 repoItem.innerHTML = `
                     <span class="repo-name">📂 ${repo.name}</span>
-                    <span class="repo-files">${selectedFiles} of ${totalFiles} files · ~${formatTokenCount(selectedTokenCount + selectedIgnoredTokenCount)} tokens</span>
+                    <span class="repo-files">
+                        ${includedSelected} of ${includedTotal} included files · 
+                        ${ignoredSelected} of ${ignoredTotal} ignored files · 
+                        ~${formatTokenCount(selectedTokenCount)} tokens
+                    </span>
                 `;
                 selectedReposList.appendChild(repoItem);
             });
@@ -2951,34 +3067,8 @@
             selectedRepoIds = [];
             updateSelectionCount();
             
-            // Populate the checklist
-            availableRepos.forEach(repo => {
-                const item = document.createElement('div');
-                item.classList.add('repo-checkbox-item');
-                item.innerHTML = `
-                    <input type="checkbox" id="${repo.id}" data-path="${repo.path}" />
-                    <label for="${repo.id}">📂 ${repo.name}</label>
-                `;
-                repoChecklist.appendChild(item);
-                
-                // Add event listener to checkbox
-                const checkbox = item.querySelector('input[type="checkbox"]');
-                checkbox.addEventListener('change', function() {
-                    if (this.checked) {
-                        // Add to selected repos
-                        if (!selectedRepoIds.includes(repo.id)) {
-                            selectedRepoIds.push(repo.id);
-                        }
-                    } else {
-                        // Remove from selected repos
-                        const index = selectedRepoIds.indexOf(repo.id);
-                        if (index !== -1) {
-                            selectedRepoIds.splice(index, 1);
-                        }
-                    }
-                    updateSelectionCount();
-                });
-            });
+            // Render repositories with current search and sort settings
+            renderRepositoryList();
             
             if (availableRepos.length > 0) {
                 // Disable step 1
@@ -3052,6 +3142,151 @@
                  (ignoredTreeData && ignoredTreeData.length > 0))) {
                 restoreSelectionState();
             }
+        });
+
+        // Function to copy repository contents
+        function copyRepoContents(repo, isIgnored = false) {
+            // Get all selected files from the repo
+            const files = getSelectedFiles(repo);
+            
+            if (files.length === 0) {
+                showNotification(`No selected files to copy in "${repo.name}"`, 'info');
+                return;
+            }
+            
+            // Find the actual repo object with path information
+            const repoInfo = selectedRepos.find(r => r.name === repo.name);
+            if (!repoInfo) return;
+            
+            // Format content in the same format as the main copy functionality
+            const content = files.map(file => 
+                `Repository: ${repo.name}\nAbsolute Path: ${file.path} :\n${file.content || ""}`
+            ).join('\n\n');
+            
+            // Try to copy to clipboard using the browser API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(content)
+                    .then(() => {
+                        showNotification(`📋 Repository "${repo.name}" - ${files.length} selected files copied to clipboard!`, 'success');
+                    })
+                    .catch(err => {
+                        // Fall back to the server-side API if browser API fails
+                        fallbackCopyToClipboard([{
+                            name: repo.name,
+                            path: repoInfo.path,
+                            files: files
+                        }]);
+                    });
+            } else {
+                // Fall back to the server-side API if browser API is not available
+                fallbackCopyToClipboard([{
+                    name: repo.name,
+                    path: repoInfo.path,
+                    files: files
+                }]);
+            }
+        }
+
+        // Function to render the repository list with current search and sort settings
+        function renderRepositoryList() {
+            // Clear previous list
+            repoChecklist.innerHTML = '';
+            
+            if (!availableRepos || availableRepos.length === 0) {
+                repoChecklist.innerHTML = '<div class="empty-message">No repositories found</div>';
+                return;
+            }
+            
+            // Get search term
+            const searchTerm = repoSearchInput.value.trim().toLowerCase();
+            
+            // Filter repositories based on search term
+            let filteredRepos = availableRepos;
+            if (searchTerm) {
+                filteredRepos = availableRepos.filter(repo => 
+                    repo.name.toLowerCase().includes(searchTerm) || 
+                    repo.path.toLowerCase().includes(searchTerm)
+                );
+            }
+            
+            // Show message if no matching repositories
+            if (filteredRepos.length === 0) {
+                repoChecklist.innerHTML = '<div class="empty-message">No matching repositories found</div>';
+                return;
+            }
+            
+            // Sort repositories based on selected sort option
+            const sortOption = repoSortSelect.value;
+            
+            switch (sortOption) {
+                case 'name-asc':
+                    filteredRepos.sort((a, b) => a.name.localeCompare(b.name));
+                    break;
+                case 'name-desc':
+                    filteredRepos.sort((a, b) => b.name.localeCompare(a.name));
+                    break;
+                case 'default':
+                    // Assuming default order is the order they came in from the API
+                    // If we need to preserve the original index, we could add an originalIndex property
+                    // For now, we'll just use the natural order they are in
+                    break;
+            }
+            
+            // Render sorted and filtered repositories
+            filteredRepos.forEach(repo => {
+                const item = document.createElement('div');
+                item.classList.add('repo-checkbox-item');
+                item.innerHTML = `
+                    <input type="checkbox" id="${repo.id}" data-path="${repo.path}" />
+                    <label for="${repo.id}">📂 ${repo.name}</label>
+                `;
+                repoChecklist.appendChild(item);
+                
+                // Add event listener to checkbox
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                // Check if this repo is already selected
+                checkbox.checked = selectedRepoIds.includes(repo.id);
+                
+                checkbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        // Add to selected repos
+                        if (!selectedRepoIds.includes(repo.id)) {
+                            selectedRepoIds.push(repo.id);
+                        }
+                    } else {
+                        // Remove from selected repos
+                        const index = selectedRepoIds.indexOf(repo.id);
+                        if (index !== -1) {
+                            selectedRepoIds.splice(index, 1);
+                        }
+                    }
+                    updateSelectionCount();
+                });
+            });
+        }
+
+        // Repository search event handlers
+        repoSearchInput.addEventListener('input', () => {
+            renderRepositoryList();
+        });
+        
+        repoSearchClear.addEventListener('click', () => {
+            repoSearchInput.value = '';
+            renderRepositoryList();
+        });
+        
+        // Repository sort event handler
+        repoSortSelect.addEventListener('change', () => {
+            renderRepositoryList();
+        });
+
+        // Tree sort event handlers
+        treeSortSelect.addEventListener('change', () => {
+            renderFileTree();
+        });
+        
+        ignoredTreeSortSelect.addEventListener('change', () => {
+            renderIgnoredFileTree();
         });
     });
 </script>
@@ -3164,6 +3399,331 @@
         font-size: 10px;
         min-width: 10px;
         color: var(--text-secondary);
+    }
+
+    .tree-action-button {
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 4px;
+        padding: 0.25rem 0.5rem;
+        cursor: pointer;
+        font-size: 12px;
+        margin-left: 4px;
+        color: var(--text-secondary);
+    }
+
+    .tree-action-button:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+
+    .tree-action-button.copy-repo {
+        display: flex;
+        align-items: center;
+    }
+
+    .tree-action-button.copy-repo::before {
+        content: "📋";
+        margin-right: 4px;
+    }
+
+    .repo-controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+        gap: 1.5rem;
+        flex-wrap: nowrap;
+    }
+
+    .repo-search {
+        position: relative;
+        flex: 1;
+        display: flex;
+        align-items: center;
+        min-width: 0;
+    }
+
+    .repo-search-icon {
+        position: absolute;
+        left: 10px;
+        color: var(--text-secondary);
+        font-size: 14px;
+        z-index: 1;
+    }
+
+    .repo-search-input {
+        width: 100%;
+        padding: 4px 30px 4px 30px;
+        height: 30px;
+        border-radius: 4px;
+        background-color: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--text-primary);
+        font-size: 14px;
+        line-height: 1;
+        margin: 0;
+        vertical-align: middle;
+        box-sizing: border-box;
+    }
+
+    .repo-search-clear {
+        position: absolute;
+        right: 10px;
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 16px;
+        z-index: 1;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+    }
+
+    .repo-sort {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+        height: 30px;
+        align-self: normal;
+    }
+
+    .repo-sort label {
+        margin: 0;
+        padding: 0;
+        line-height: 30px;
+        color: var(--text-secondary);
+        font-size: 14px;
+        display: inline-block;
+        vertical-align: middle;
+        height: 30px;
+    }
+
+    .repo-sort select {
+        padding: 4px 8px;
+        height: 30px;
+        border-radius: 4px;
+        background-color: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--text-primary);
+        cursor: pointer;
+        appearance: auto;
+        font-size: 14px;
+        line-height: 1;
+        margin: 0;
+        vertical-align: middle;
+        box-sizing: border-box;
+    }
+    
+    .repo-sort select option {
+        background-color: #252525;
+        color: var(--text-primary);
+    }
+
+    .empty-message {
+        padding: 1rem;
+        text-align: center;
+        color: var(--text-secondary);
+        font-style: italic;
+    }
+
+    /* Tree controls styles */
+    .tree-controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+        gap: 1.5rem;
+        flex-wrap: nowrap;
+    }
+    
+    .tree-search {
+        position: relative;
+        flex: 1;
+        display: flex;
+        align-items: center;
+        min-width: 0;
+    }
+    
+    .tree-search-icon {
+        position: absolute;
+        left: 10px;
+        color: var(--text-secondary);
+        font-size: 14px;
+        z-index: 1;
+    }
+    
+    .tree-search-input {
+        width: 100%;
+        padding: 4px 30px 4px 30px;
+        height: 30px;
+        border-radius: 4px;
+        background-color: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--text-primary);
+        font-size: 14px;
+        line-height: 1;
+        margin: 0;
+        vertical-align: middle;
+        box-sizing: border-box;
+    }
+    
+    .tree-search-clear {
+        position: absolute;
+        right: 10px;
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 16px;
+        z-index: 1;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+    }
+    
+    .tree-sort {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+        height: 30px;
+        align-self: normal;
+    }
+    
+    .tree-sort label {
+        margin: 0;
+        padding: 0;
+        line-height: 30px;
+        color: var(--text-secondary);
+        font-size: 14px;
+        display: inline-block;
+        vertical-align: middle;
+        height: 30px;
+    }
+    
+    .tree-sort select {
+        padding: 4px 8px;
+        height: 30px;
+        border-radius: 4px;
+        background-color: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--text-primary);
+        cursor: pointer;
+        appearance: auto;
+        font-size: 14px;
+        line-height: 1;
+        margin: 0;
+        vertical-align: middle;
+        box-sizing: border-box;
+    }
+    
+    .tree-sort select option {
+        background-color: #252525;
+        color: var(--text-primary);
+    }
+
+    /* Checkbox styling improvements */
+    .checkbox-wrapper {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 8px;
+        flex-shrink: 0;
+    }
+    
+    .tree-checkbox {
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(255, 255, 255, 0.7);
+        border-radius: 3px;
+        background-color: rgba(30, 30, 30, 0.8);
+        cursor: pointer;
+        position: relative;
+        margin: 0;
+        outline: none;
+    }
+    
+    .tree-checkbox:checked {
+        background-color: #28a745;
+        border-color: #28a745;
+    }
+    
+    .tree-checkbox:checked::after {
+        content: "✓";
+        position: absolute;
+        top: -2px;
+        left: 2px;
+        color: white;
+        font-size: 12px;
+        font-weight: bold;
+    }
+    
+    .tree-checkbox.indeterminate {
+        background-color: rgba(40, 167, 69, 0.5);
+        border-color: #28a745;
+    }
+    
+    .tree-checkbox.indeterminate::after {
+        content: "-";
+        position: absolute;
+        top: -4px;
+        left: 3px;
+        color: white;
+        font-size: 14px;
+        font-weight: bold;
+    }
+    
+    .tree-checkbox:hover {
+        border-color: #28a745;
+    }
+
+    /* Copy summary stats styling */
+    .copy-summary-stats {
+        display: flex;
+        gap: 1.5rem;
+        margin-bottom: 1rem;
+        background-color: rgba(255, 255, 255, 0.08);
+        padding: 10px 15px;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .stats-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .stats-label {
+        color: var(--text-secondary);
+        font-size: 14px;
+    }
+    
+    .stats-value {
+        font-weight: bold;
+        font-size: 16px;
+        color: var(--text-primary);
+    }
+
+    /* Count badge styling */
+    .count-badge {
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 14px;
+        font-weight: normal;
+        margin-left: 8px;
     }
 </style>
 {% endblock %}
