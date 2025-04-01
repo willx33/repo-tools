@@ -73,5 +73,8 @@ repo-web --no-browser
 # Run in the background
 repo-web --background
 ```
+## Coming Soon
+- Custom prompt saving and prompt customization, including built in prompts like output as XML Whole prompt.
+- Built in XML Diff applicator, using repository selector then directly applying changes.
 
 That's it! Made by me with ❤️
