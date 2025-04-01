@@ -69,24 +69,28 @@
         
         <!-- Files to be included section -->
         <div class="summary-box">
-            <div class="summary-header">
+            <div class="summary-header included-header" id="included-files-header">
                 <h4>Files to be included:</h4>
                 <span id="included-count" class="count-badge">0 files</span>
+                <button class="expand-collapse-btn">Collapse ▲</button>
             </div>
             
-            <!-- File Tree Search -->
-            <div class="tree-search">
-                <span class="tree-search-icon">🔍</span>
-                <input type="text" id="tree-search-input" class="tree-search-input" placeholder="Search files...">
-                <button id="tree-search-clear" class="tree-search-clear">×</button>
-            </div>
-            
-            <!-- New File Tree View -->
-            <div id="file-tree" class="file-tree">
-                <!-- File tree will be rendered here -->
-                <div class="tree-empty">
-                    <div class="tree-empty-icon">📂</div>
-                    <p>No files loaded yet</p>
+            <!-- Included Files Content -->
+            <div class="included-content">
+                <!-- File Tree Search -->
+                <div class="tree-search">
+                    <span class="tree-search-icon">🔍</span>
+                    <input type="text" id="tree-search-input" class="tree-search-input" placeholder="Search files...">
+                    <button id="tree-search-clear" class="tree-search-clear">×</button>
+                </div>
+                
+                <!-- New File Tree View -->
+                <div id="file-tree" class="file-tree">
+                    <!-- File tree will be rendered here -->
+                    <div class="tree-empty">
+                        <div class="tree-empty-icon">📂</div>
+                        <p>No files loaded yet</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -188,7 +192,10 @@
         const ignoredCount = document.getElementById('ignored-count');
         const ignoredHeader = document.getElementById('ignored-files-header');
         const ignoredContent = document.querySelector('.ignored-content');
-        const expandCollapseBtn = document.querySelector('.expand-collapse-btn');
+        const includedHeader = document.getElementById('included-files-header');
+        const includedContent = document.querySelector('.included-content');
+        const expandCollapseBtn = document.querySelector('.ignored-files-section .expand-collapse-btn');
+        const includedExpandCollapseBtn = includedHeader.querySelector('.expand-collapse-btn');
         const ignoredFileTree = document.getElementById('ignored-file-tree');
         const copyButton = document.getElementById('copy-button');
         const refreshButton = document.getElementById('refresh-button');
@@ -222,7 +229,10 @@
         let totalTokenCount = 0; // Track total tokens across all repos
         
         // Toggle ignored files section expand/collapse
-        ignoredHeader.addEventListener('click', function() {
+        ignoredHeader.addEventListener('click', function(e) {
+            // Don't toggle if clicking on the button directly (it has its own handler)
+            if (e.target.classList.contains('expand-collapse-btn')) return;
+            
             ignoredContent.classList.toggle('hidden');
             const btn = this.querySelector('.expand-collapse-btn');
             
@@ -230,6 +240,50 @@
                 btn.textContent = 'Expand ▼';
             } else {
                 btn.textContent = 'Collapse ▲';
+                // When expanding, re-render the ignored files tree
+                renderIgnoredFileTree();
+            }
+        });
+        
+        // Toggle included files section expand/collapse
+        includedHeader.addEventListener('click', function(e) {
+            // Don't toggle if clicking on the button directly (it has its own handler)
+            if (e.target.classList.contains('expand-collapse-btn')) return;
+            
+            includedContent.classList.toggle('hidden');
+            const btn = this.querySelector('.expand-collapse-btn');
+            
+            if (includedContent.classList.contains('hidden')) {
+                btn.textContent = 'Expand ▼';
+            } else {
+                btn.textContent = 'Collapse ▲';
+                // When expanding, re-render the file tree
+                renderFileTree();
+            }
+        });
+        
+        // Direct click handlers for the expand/collapse buttons
+        includedExpandCollapseBtn.addEventListener('click', function(e) {
+            e.stopPropagation(); // Prevent the header click handler from firing
+            includedContent.classList.toggle('hidden');
+            
+            if (includedContent.classList.contains('hidden')) {
+                this.textContent = 'Expand ▼';
+            } else {
+                this.textContent = 'Collapse ▲';
+                // When expanding, re-render the file tree
+                renderFileTree();
+            }
+        });
+        
+        expandCollapseBtn.addEventListener('click', function(e) {
+            e.stopPropagation(); // Prevent the header click handler from firing
+            ignoredContent.classList.toggle('hidden');
+            
+            if (ignoredContent.classList.contains('hidden')) {
+                this.textContent = 'Expand ▼';
+            } else {
+                this.textContent = 'Collapse ▲';
                 // When expanding, re-render the ignored files tree
                 renderIgnoredFileTree();
             }
@@ -685,6 +739,8 @@
             fileTreeData.forEach(repo => {
                 const repoElement = document.createElement('div');
                 repoElement.classList.add('tree-repo');
+                // By default, repositories start collapsed
+                // We're removing the expanded class by default
                 repoElement.dataset.name = repo.name;
                 
                 // Repository header
@@ -731,6 +787,11 @@
                 
                 checkboxWrapper.appendChild(repoCheckbox);
                 
+                // Add collapse/expand indicator
+                const collapseExpandIndicator = document.createElement('span');
+                collapseExpandIndicator.classList.add('tree-repo-collapse-indicator');
+                collapseExpandIndicator.textContent = '▶'; // Collapsed state (triangle pointing right)
+                
                 repoHeader.innerHTML = `
                     <div class="tree-repo-name">
                         <span class="tree-repo-icon">📦</span>
@@ -740,6 +801,7 @@
                         ${repo.fileCount} files · ~${formatTokenCount(repo.tokenCount)} tokens
                     </div>
                     <div class="tree-repo-actions">
+                        <button class="tree-action-button copy-repo">Copy Selected</button>
                         <button class="tree-action-button expand-all">Expand All</button>
                         <button class="tree-action-button collapse-all">Collapse All</button>
                     </div>
@@ -748,9 +810,13 @@
                 // Insert checkbox wrapper as first child
                 repoHeader.insertBefore(checkboxWrapper, repoHeader.firstChild);
                 
+                // Insert collapse/expand indicator after checkbox
+                repoHeader.querySelector('.tree-repo-name').insertBefore(collapseExpandIndicator, repoHeader.querySelector('.tree-repo-name').firstChild);
+                
                 // Repository content
                 const repoContent = document.createElement('div');
                 repoContent.classList.add('tree-repo-content');
+                repoContent.classList.add('hidden'); // Initially hidden
                 
                 // Add repository children (directories and files)
                 const sortedChildren = Object.values(repo.children)
@@ -775,18 +841,26 @@
                 const expandAllBtn = repoHeader.querySelector('.expand-all');
                 expandAllBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    // First expand this repo
+                    repoContent.classList.remove('hidden');
+                    collapseExpandIndicator.textContent = '▼'; // Expanded state
+                    
+                    // Then expand all directories within
                     const directories = repoElement.querySelectorAll('.tree-directory');
                     directories.forEach(dir => {
                         dir.classList.add('expanded');
+                        dir.querySelector('.tree-directory-icon').textContent = '▼';
                     });
                 });
                 
                 const collapseAllBtn = repoHeader.querySelector('.collapse-all');
                 collapseAllBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    // Collapse all directories, but leave the repo itself expanded
                     const directories = repoElement.querySelectorAll('.tree-directory');
                     directories.forEach(dir => {
                         dir.classList.remove('expanded');
+                        dir.querySelector('.tree-directory-icon').textContent = '▶';
                     });
                 });
                 
@@ -794,7 +868,13 @@
                 repoHeader.addEventListener('click', (e) => {
                     // Only toggle if not clicking on checkbox, its wrapper, or action buttons
                     if (!e.target.closest('.checkbox-wrapper') && !e.target.closest('.tree-action-button')) {
-                        repoElement.classList.toggle('expanded');
+                        repoContent.classList.toggle('hidden');
+                        // Update the collapse/expand indicator
+                        if (repoContent.classList.contains('hidden')) {
+                            collapseExpandIndicator.textContent = '▶'; // Collapsed state
+                        } else {
+                            collapseExpandIndicator.textContent = '▼'; // Expanded state
+                        }
                     }
                 });
                 
@@ -851,6 +931,7 @@
             ignoredTreeData.forEach(repo => {
                 const repoElement = document.createElement('div');
                 repoElement.classList.add('tree-repo');
+                // By default, repositories start collapsed
                 repoElement.dataset.name = repo.name;
                 
                 // Repository header
@@ -897,6 +978,11 @@
                 
                 checkboxWrapper.appendChild(repoCheckbox);
                 
+                // Add collapse/expand indicator
+                const collapseExpandIndicator = document.createElement('span');
+                collapseExpandIndicator.classList.add('tree-repo-collapse-indicator');
+                collapseExpandIndicator.textContent = '▶'; // Collapsed state (triangle pointing right)
+                
                 repoHeader.innerHTML = `
                     <div class="tree-repo-name">
                         <span class="tree-repo-icon">📦</span>
@@ -914,9 +1000,13 @@
                 // Insert checkbox wrapper as first child
                 repoHeader.insertBefore(checkboxWrapper, repoHeader.firstChild);
                 
+                // Insert collapse/expand indicator after checkbox
+                repoHeader.querySelector('.tree-repo-name').insertBefore(collapseExpandIndicator, repoHeader.querySelector('.tree-repo-name').firstChild);
+                
                 // Repository content
                 const repoContent = document.createElement('div');
                 repoContent.classList.add('tree-repo-content');
+                repoContent.classList.add('hidden'); // Initially hidden
                 
                 // Add repository children (directories and files)
                 const sortedChildren = Object.values(repo.children)
@@ -941,18 +1031,26 @@
                 const expandAllBtn = repoHeader.querySelector('.expand-all');
                 expandAllBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    // First expand this repo
+                    repoContent.classList.remove('hidden');
+                    collapseExpandIndicator.textContent = '▼'; // Expanded state
+                    
+                    // Then expand all directories within
                     const directories = repoElement.querySelectorAll('.tree-directory');
                     directories.forEach(dir => {
                         dir.classList.add('expanded');
+                        dir.querySelector('.tree-directory-icon').textContent = '▼';
                     });
                 });
                 
                 const collapseAllBtn = repoHeader.querySelector('.collapse-all');
                 collapseAllBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    // Collapse all directories, but leave the repo itself expanded
                     const directories = repoElement.querySelectorAll('.tree-directory');
                     directories.forEach(dir => {
                         dir.classList.remove('expanded');
+                        dir.querySelector('.tree-directory-icon').textContent = '▶';
                     });
                 });
                 
@@ -960,7 +1058,13 @@
                 repoHeader.addEventListener('click', (e) => {
                     // Only toggle if not clicking on checkbox, its wrapper, or action buttons
                     if (!e.target.closest('.checkbox-wrapper') && !e.target.closest('.tree-action-button')) {
-                        repoElement.classList.toggle('expanded');
+                        repoContent.classList.toggle('hidden');
+                        // Update the collapse/expand indicator
+                        if (repoContent.classList.contains('hidden')) {
+                            collapseExpandIndicator.textContent = '▶'; // Collapsed state
+                        } else {
+                            collapseExpandIndicator.textContent = '▼'; // Expanded state
+                        }
                     }
                 });
                 
@@ -1166,7 +1270,10 @@
             
             checkboxWrapper.appendChild(dirCheckbox);
             
-            dirHeader.innerHTML = `
+            // Directory header with name and stats
+            const dirHeaderContent = document.createElement('div');
+            dirHeaderContent.classList.add('directory-header-content');
+            dirHeaderContent.innerHTML = `
                 <div class="tree-directory-name">
                     <span class="tree-directory-icon">▶</span>
                     <span>📂 ${directory.name}</span>
@@ -1177,8 +1284,26 @@
                 </div>
             `;
             
-            // Insert checkbox wrapper as first child
-            dirHeader.insertBefore(checkboxWrapper, dirHeader.firstChild);
+            // Create action buttons container
+            const actionBtns = document.createElement('div');
+            actionBtns.classList.add('tree-item-actions');
+            
+            // Add copy button
+            const copyBtn = document.createElement('button');
+            copyBtn.classList.add('tree-action-icon', 'copy-btn');
+            copyBtn.title = "Copy directory contents";
+            copyBtn.innerHTML = "📋";
+            copyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                copyDirectoryContents(directory, repoName);
+            });
+            
+            actionBtns.appendChild(copyBtn);
+            
+            // Add elements to header in correct order
+            dirHeader.appendChild(checkboxWrapper);
+            dirHeader.appendChild(dirHeaderContent);
+            dirHeader.appendChild(actionBtns);
             
             // Directory content
             const dirContent = document.createElement('div');
@@ -1203,12 +1328,20 @@
                 }
             });
             
-            // Toggle directory expansion on header click
-            dirHeader.addEventListener('click', (e) => {
+            // Toggle directory expansion on header click (but not on action buttons)
+            dirHeaderContent.addEventListener('click', (e) => {
                 // Only toggle if not clicking on checkbox or its wrapper
                 if (!e.target.closest('.checkbox-wrapper')) {
                     e.stopPropagation();
                     dirElement.classList.toggle('expanded');
+                    
+                    // Update the icon
+                    const icon = dirHeaderContent.querySelector('.tree-directory-icon');
+                    if (dirElement.classList.contains('expanded')) {
+                        icon.textContent = '▼'; // Expanded state
+                    } else {
+                        icon.textContent = '▶'; // Collapsed state
+                    }
                 }
             });
             
@@ -1284,23 +1417,36 @@
             
             checkboxWrapper.appendChild(fileCheckbox);
             
-            // Create file element structure
-            const fileContent = document.createElement('div');
-            fileContent.classList.add('tree-file-content');
-            fileContent.innerHTML = `
+            // Create file info content (filename and tokens)
+            const fileInfo = document.createElement('div');
+            fileInfo.classList.add('file-info');
+            fileInfo.innerHTML = `
                 <span class="tree-file-icon">${fileIcon}</span>
                 <span class="tree-file-name">${baseName}<span class="tree-file-ext">.${extension}</span></span>
                 <span class="tree-file-tokens">~${file.isIgnored ? "Unknown" : formatTokenCount(file.tokenCount || 0)}</span>
             `;
             
-            // Add checkbox and file content to the element
-            fileElement.appendChild(checkboxWrapper);
-            fileElement.appendChild(fileContent);
+            // Create action buttons container
+            const actionBtns = document.createElement('div');
+            actionBtns.classList.add('tree-item-actions');
             
-            // File click handler
-            fileContent.addEventListener('click', (e) => {
+            // Add copy button
+            const copyBtn = document.createElement('button');
+            copyBtn.classList.add('tree-action-icon', 'copy-btn');
+            copyBtn.title = "Copy file contents";
+            copyBtn.innerHTML = "📋";
+            copyBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                // Only show preview if there's actual content
+                copyFileContents(file, repoName);
+            });
+            
+            // Add preview button
+            const previewBtn = document.createElement('button');
+            previewBtn.classList.add('tree-action-icon', 'preview-btn');
+            previewBtn.title = "Preview file";
+            previewBtn.innerHTML = "👁️";
+            previewBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
                 if (file.content) {
                     showFilePreview(file);
                 } else if (file.isIgnored) {
@@ -1308,7 +1454,121 @@
                 }
             });
             
+            // Add buttons to the actions container
+            actionBtns.appendChild(copyBtn);
+            actionBtns.appendChild(previewBtn);
+            
+            // Create file element structure
+            const fileContent = document.createElement('div');
+            fileContent.classList.add('tree-file-content');
+            
+            // Add all elements to file content
+            fileContent.appendChild(checkboxWrapper);
+            fileContent.appendChild(fileInfo);
+            fileContent.appendChild(actionBtns);
+            
+            fileElement.appendChild(fileContent);
+            
             return fileElement;
+        }
+        
+        // Function to copy file contents
+        function copyFileContents(file, repoName) {
+            if (!file.content && file.isIgnored) {
+                showNotification('Cannot copy ignored file content (content not loaded)', 'info');
+                return;
+            }
+            
+            const repo = selectedRepos.find(r => r.name === repoName);
+            if (!repo) return;
+            
+            const content = `Repository: ${repoName}\nAbsolute Path: ${file.path} :\n${file.content || ""}`;
+            
+            // Try to copy to clipboard using the browser API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(content)
+                    .then(() => {
+                        showNotification(`📋 File "${file.name}" copied to clipboard!`, 'success');
+                    })
+                    .catch(err => {
+                        // Fall back to the server-side API if browser API fails
+                        fallbackCopyToClipboard([{
+                            name: repoName,
+                            path: repo.path,
+                            files: [{
+                                path: file.path,
+                                content: file.content || ""
+                            }]
+                        }]);
+                    });
+            } else {
+                // Fall back to the server-side API if browser API is not available
+                fallbackCopyToClipboard([{
+                    name: repoName,
+                    path: repo.path,
+                    files: [{
+                        path: file.path,
+                        content: file.content || ""
+                    }]
+                }]);
+            }
+        }
+        
+        // Function to copy directory contents
+        function copyDirectoryContents(directory, repoName) {
+            // Get all selected files in this directory
+            const files = getSelectedFiles(directory);
+            if (files.length === 0) {
+                showNotification(`No files to copy in "${directory.name}"`, 'info');
+                return;
+            }
+            
+            const repo = selectedRepos.find(r => r.name === repoName);
+            if (!repo) return;
+            
+            // Format content in the same format as the main copy functionality
+            const content = files.map(file => 
+                `Repository: ${repoName}\nAbsolute Path: ${file.path} :\n${file.content || ""}`
+            ).join('\n\n');
+            
+            // Try to copy to clipboard using the browser API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(content)
+                    .then(() => {
+                        showNotification(`📋 Directory "${directory.name}" contents (${files.length} files) copied to clipboard!`, 'success');
+                    })
+                    .catch(err => {
+                        // Fall back to the server-side API if browser API fails
+                        fallbackCopyToClipboard([{
+                            name: repoName,
+                            path: repo.path,
+                            files: files
+                        }]);
+                    });
+            } else {
+                // Fall back to the server-side API if browser API is not available
+                fallbackCopyToClipboard([{
+                    name: repoName,
+                    path: repo.path,
+                    files: files
+                }]);
+            }
+        }
+        
+        // Fallback to the server-side copy API
+        function fallbackCopyToClipboard(data) {
+            axios.post('/api/copy-to-clipboard', { selectedRepos: data })
+                .then(response => {
+                    let totalFiles = 0;
+                    data.forEach(repo => {
+                        totalFiles += repo.files.length;
+                    });
+                    
+                    showNotification(`📋 ${totalFiles} files copied to clipboard!`, 'success');
+                })
+                .catch(error => {
+                    showNotification('Error copying to clipboard: ' + error.message, 'error');
+                });
         }
         
         // Get current selection state
@@ -2802,7 +3062,7 @@
         margin-top: 1.5rem;
     }
     
-    .ignored-header {
+    .ignored-header, .included-header {
         cursor: pointer;
     }
     
@@ -2820,8 +3080,90 @@
         background-color: rgba(255, 255, 255, 0.1);
     }
     
-    .ignored-content {
+    .ignored-content, .included-content {
         padding-top: 1rem;
+    }
+    
+    .hidden {
+        display: none !important;
+    }
+    
+    /* File and directory action buttons styles */
+    .tree-item-actions {
+        display: flex;
+        gap: 4px;
+        margin-left: auto;
+        opacity: 0.6;
+    }
+    
+    .tree-file-content:hover .tree-item-actions,
+    .tree-directory-header:hover .tree-item-actions,
+    .tree-repo-header:hover .tree-item-actions {
+        opacity: 1;
+    }
+    
+    .tree-action-icon {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 14px;
+    }
+    
+    .tree-action-icon:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    /* Structure for file and directory headers */
+    .tree-file-content,
+    .tree-directory-header,
+    .tree-repo-header {
+        display: flex;
+        align-items: center;
+        width: 100%;
+    }
+    
+    .file-info,
+    .directory-header-content {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        align-items: center;
+    }
+    
+    /* Collapsible repositories styling */
+    .tree-repo-collapse-indicator {
+        display: inline-block;
+        margin-right: 4px;
+        font-size: 10px;
+        min-width: 10px;
+        color: var(--text-secondary);
+    }
+    
+    .tree-repo-header {
+        cursor: pointer;
+        padding: 5px 8px;
+        border-radius: 4px;
+        background-color: rgba(255, 255, 255, 0.05);
+        margin-bottom: 4px;
+    }
+    
+    .tree-repo-header:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .tree-repo-content {
+        padding-left: 20px;
+    }
+    
+    /* Directory icon styles */
+    .tree-directory-icon {
+        display: inline-block;
+        margin-right: 4px;
+        font-size: 10px;
+        min-width: 10px;
+        color: var(--text-secondary);
     }
 </style>
 {% endblock %}
