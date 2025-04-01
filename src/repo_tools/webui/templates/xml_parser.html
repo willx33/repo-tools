@@ -499,6 +499,7 @@
       const operationBadge = document.createElement('span');
       operationBadge.className = `badge ${change.operation.toLowerCase()}`;
       operationBadge.textContent = change.operation;
+      operationBadge.style.marginRight = '8px';
       
       const path = document.createElement('span');
       path.className = 'file-path';
@@ -538,11 +539,6 @@
       return;
     }
     
-    // Confirm before applying changes
-    if (!confirm(`Are you sure you want to apply these changes to ${selectedRepository.name}?`)) {
-      return;
-    }
-    
     // Emit socket event
     socket.emit('xml_apply', { 
       xml: xml, 
@@ -568,10 +564,12 @@
       const statusIcon = document.createElement('span');
       statusIcon.className = 'status-icon';
       statusIcon.textContent = result.success ? '✅' : '❌';
+      statusIcon.style.marginRight = '8px';
       
       const operationBadge = document.createElement('span');
       operationBadge.className = `badge ${result.operation.toLowerCase()}`;
       operationBadge.textContent = result.operation;
+      operationBadge.style.marginRight = '8px';
       
       const path = document.createElement('span');
       path.className = 'file-path';
