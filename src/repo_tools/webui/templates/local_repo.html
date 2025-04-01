@@ -67,6 +67,7 @@
             </div>
         </div>
         
+        <!-- Files to be included section -->
         <div class="summary-box">
             <div class="summary-header">
                 <h4>Files to be included:</h4>
@@ -88,10 +89,33 @@
                     <p>No files loaded yet</p>
                 </div>
             </div>
-            
-            <div class="summary-header">
+        </div>
+        
+        <!-- Files ignored section - collapsed by default -->
+        <div class="summary-box ignored-files-section">
+            <div class="summary-header ignored-header" id="ignored-files-header">
                 <h4>Files ignored:</h4>
                 <span id="ignored-count" class="count-badge">0 files</span>
+                <button class="expand-collapse-btn">Expand ▼</button>
+            </div>
+            
+            <!-- Collapsed content -->
+            <div class="ignored-content hidden">
+                <!-- Ignored Files Tree Search -->
+                <div class="tree-search">
+                    <span class="tree-search-icon">🔍</span>
+                    <input type="text" id="ignored-tree-search-input" class="tree-search-input" placeholder="Search ignored files...">
+                    <button id="ignored-tree-search-clear" class="tree-search-clear">×</button>
+                </div>
+                
+                <!-- Ignored Files Tree View -->
+                <div id="ignored-file-tree" class="file-tree">
+                    <!-- Ignored file tree will be rendered here -->
+                    <div class="tree-empty">
+                        <div class="tree-empty-icon">📂</div>
+                        <p>No ignored files loaded yet</p>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -162,6 +186,10 @@
         const includedCount = document.getElementById('included-count');
         const fileTree = document.getElementById('file-tree');
         const ignoredCount = document.getElementById('ignored-count');
+        const ignoredHeader = document.getElementById('ignored-files-header');
+        const ignoredContent = document.querySelector('.ignored-content');
+        const expandCollapseBtn = document.querySelector('.expand-collapse-btn');
+        const ignoredFileTree = document.getElementById('ignored-file-tree');
         const copyButton = document.getElementById('copy-button');
         const refreshButton = document.getElementById('refresh-button');
         const backToSelectButton = document.getElementById('back-to-select-button');
@@ -172,6 +200,8 @@
         // File tree search
         const treeSearchInput = document.getElementById('tree-search-input');
         const treeSearchClear = document.getElementById('tree-search-clear');
+        const ignoredTreeSearchInput = document.getElementById('ignored-tree-search-input');
+        const ignoredTreeSearchClear = document.getElementById('ignored-tree-search-clear');
         
         // File preview modal
         const filePreviewModal = document.getElementById('file-preview-modal');
@@ -187,8 +217,23 @@
         let availableRepos = [];
         let selectedRepoIds = []; // Store selected repo IDs
         let selectedRepos = [];
-        let fileTreeData = []; // Store hierarchical file tree data
+        let fileTreeData = []; // Store hierarchical file tree data for included files
+        let ignoredTreeData = []; // Store hierarchical file tree data for ignored files
         let totalTokenCount = 0; // Track total tokens across all repos
+        
+        // Toggle ignored files section expand/collapse
+        ignoredHeader.addEventListener('click', function() {
+            ignoredContent.classList.toggle('hidden');
+            const btn = this.querySelector('.expand-collapse-btn');
+            
+            if (ignoredContent.classList.contains('hidden')) {
+                btn.textContent = 'Expand ▼';
+            } else {
+                btn.textContent = 'Collapse ▲';
+                // When expanding, re-render the ignored files tree
+                renderIgnoredFileTree();
+            }
+        });
         
         // Load paths
         function loadPaths() {
@@ -330,6 +375,7 @@
             let loadedCount = 0;
             selectedRepos = [];
             fileTreeData = [];
+            ignoredTreeData = [];
             
             // Load each selected repository
             selectedRepoIds.forEach((repoId, index) => {
@@ -350,9 +396,13 @@
                             // Add to selected repos
                             selectedRepos.push(loadedRepo);
                             
-                            // Convert the repository's files into a hierarchical tree structure
-                            const repoTreeData = buildFileTree(loadedRepo.included, loadedRepo.name);
+                            // Convert the repository's included files into a hierarchical tree structure
+                            const repoTreeData = buildFileTree(loadedRepo.included, loadedRepo.name, false);
                             fileTreeData.push(repoTreeData);
+                            
+                            // Convert the repository's ignored files into a hierarchical tree structure
+                            const repoIgnoredTreeData = buildFileTree(loadedRepo.ignored.map(path => ({ path, content: "" })), loadedRepo.name, true);
+                            ignoredTreeData.push(repoIgnoredTreeData);
                             
                             // Track completion
                             loadedCount++;
@@ -364,8 +414,9 @@
                                 // Update UI with file summary
                                 updateFileSummary();
                                 
-                                // Render the file tree
+                                // Render the file trees
                                 renderFileTree();
+                                // Ignored file tree will be rendered when expanded
                                 
                                 // Show the file summary step
                                 stepFileSummary.classList.remove('hidden');
@@ -433,8 +484,16 @@
             }
         }
         
+        // Helper function to display "Unknown" for ignored files token counts
+        function getTokenDisplay(file) {
+            if (file.isIgnored) {
+                return "Unknown";
+            }
+            return formatTokenCount(file.tokenCount || 0);
+        }
+        
         // Build a hierarchical file tree from flat file list
-        function buildFileTree(files, repoName) {
+        function buildFileTree(files, repoName, isIgnored = false) {
             const root = { 
                 name: repoName, 
                 type: 'repo', 
@@ -442,18 +501,23 @@
                 expanded: true,
                 fileCount: 0, // Will be calculated below
                 tokenCount: 0,
-                selected: true, // Default selected state
-                indeterminate: false
+                selected: !isIgnored, // Default selected state (true for included, false for ignored)
+                indeterminate: false,
+                isIgnored: isIgnored
             };
             let totalFileCount = 0;
 
             files.forEach(file => {
+                // Convert ignored files array format to match included files format
+                const filePath = typeof file === 'string' ? file : file.path;
+                const fileContent = typeof file === 'string' ? "" : file.content;
+                
                 // Estimate tokens in file content
-                const tokenCount = estimateTokens(file.content);
+                const tokenCount = estimateTokens(fileContent);
                 totalFileCount++; // Increment total file count for the repo
                 
                 // Extract the relative path (remove repository path prefix if present)
-                let relativePath = file.path;
+                let relativePath = filePath;
                 if (typeof relativePath === 'string' && relativePath.includes(repoName)) {
                     // Try to extract the relative path after the repository name
                     const parts = relativePath.split(repoName);
@@ -485,8 +549,9 @@
                             fileCount: 0, // Initialize file count for new directory
                             tokenCount: 0, // Initialize token count for new directory
                             path: dirPath, // Store relative path for the directory
-                            selected: true, // Default selected state
-                            indeterminate: false
+                            selected: !isIgnored, // Default selected state (true for included, false for ignored)
+                            indeterminate: false,
+                            isIgnored: isIgnored
                         };
                     }
                     // Increment file count for the directory containing this file/subdir
@@ -503,12 +568,13 @@
                     currentLevelNode.children[fileName] = { 
                         name: fileName, 
                         type: 'file',
-                        path: file.path, // Store full original path
-                        content: file.content,
+                        path: filePath, // Store full original path
+                        content: fileContent,
                         extension: getFileExtension(fileName),
                         tokenCount: tokenCount,
-                        selected: true, // Default selected state
-                        indeterminate: false
+                        selected: !isIgnored, // Default selected state (true for included, false for ignored)
+                        indeterminate: false,
+                        isIgnored: isIgnored
                     };
                     
                     // Update token counts for all ancestors (directories and the root)
@@ -750,6 +816,166 @@
             applySearchFilter();
         }
         
+        // Render ignored file tree - similar to renderFileTree but for ignored files
+        function renderIgnoredFileTree() {
+            // Clear previous content
+            ignoredFileTree.innerHTML = '';
+            let totalIgnoredFileCount = 0;
+            let selectedIgnoredFileCount = 0;
+            
+            // Handle empty case
+            if (ignoredTreeData.length === 0) {
+                ignoredFileTree.innerHTML = `
+                    <div class="tree-empty">
+                        <div class="tree-empty-icon">📂</div>
+                        <p>No ignored files loaded yet</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Calculate counts first to ensure accuracy
+            ignoredTreeData.forEach(repo => {
+                totalIgnoredFileCount += repo.fileCount;
+                
+                // Count selected items
+                if (repo.selected) {
+                    selectedIgnoredFileCount += repo.fileCount;
+                } else if (repo.indeterminate) {
+                    // For indeterminate state, count only selected children
+                    selectedIgnoredFileCount += getSelectedFileCount(repo);
+                }
+            });
+
+            // Now render the tree with accurate counts
+            ignoredTreeData.forEach(repo => {
+                const repoElement = document.createElement('div');
+                repoElement.classList.add('tree-repo');
+                repoElement.dataset.name = repo.name;
+                
+                // Repository header
+                const repoHeader = document.createElement('div');
+                repoHeader.classList.add('tree-repo-header');
+                
+                // Create checkbox wrapper
+                const checkboxWrapper = document.createElement('div');
+                checkboxWrapper.classList.add('checkbox-wrapper');
+                
+                // Create checkbox for repository
+                const repoCheckbox = document.createElement('input');
+                repoCheckbox.type = 'checkbox';
+                repoCheckbox.checked = repo.selected;
+                repoCheckbox.classList.add('tree-checkbox');
+                
+                // Add indeterminate state if needed
+                if (repo.indeterminate) {
+                    repoCheckbox.classList.add('indeterminate');
+                    repoCheckbox.dataset.indeterminate = 'true';
+                }
+                
+                // Stop event propagation on the checkbox
+                repoCheckbox.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                });
+                
+                repoCheckbox.addEventListener('change', (e) => {
+                    e.stopPropagation();
+                    
+                    // Apply selection state to repo and all its children
+                    const isSelected = e.target.checked;
+                    updateSelectionState(repo, isSelected);
+                    
+                    // Re-render tree immediately to reflect changes
+                    renderIgnoredFileTree();
+                    
+                    // Update the summary counts
+                    updateFileSummary();
+                    
+                    // Save selection state to localStorage
+                    saveSelectionState();
+                });
+                
+                checkboxWrapper.appendChild(repoCheckbox);
+                
+                repoHeader.innerHTML = `
+                    <div class="tree-repo-name">
+                        <span class="tree-repo-icon">📦</span>
+                        ${repo.name}
+                    </div>
+                    <div class="tree-repo-stats">
+                        ${repo.fileCount} files
+                    </div>
+                    <div class="tree-repo-actions">
+                        <button class="tree-action-button expand-all">Expand All</button>
+                        <button class="tree-action-button collapse-all">Collapse All</button>
+                    </div>
+                `;
+                
+                // Insert checkbox wrapper as first child
+                repoHeader.insertBefore(checkboxWrapper, repoHeader.firstChild);
+                
+                // Repository content
+                const repoContent = document.createElement('div');
+                repoContent.classList.add('tree-repo-content');
+                
+                // Add repository children (directories and files)
+                const sortedChildren = Object.values(repo.children)
+                    .sort((a, b) => {
+                        // Directories first, then files
+                        if (a.type !== b.type) {
+                            return a.type === 'directory' ? -1 : 1;
+                        }
+                        // Alphabetical within same type
+                        return a.name.localeCompare(b.name);
+                    });
+                
+                sortedChildren.forEach(child => {
+                    if (child.type === 'directory') {
+                        repoContent.appendChild(renderDirectory(child, repo.name));
+                    } else {
+                        repoContent.appendChild(renderFile(child, repo.name));
+                    }
+                });
+                
+                // Keep existing event listeners for expand/collapse all
+                const expandAllBtn = repoHeader.querySelector('.expand-all');
+                expandAllBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const directories = repoElement.querySelectorAll('.tree-directory');
+                    directories.forEach(dir => {
+                        dir.classList.add('expanded');
+                    });
+                });
+                
+                const collapseAllBtn = repoHeader.querySelector('.collapse-all');
+                collapseAllBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const directories = repoElement.querySelectorAll('.tree-directory');
+                    directories.forEach(dir => {
+                        dir.classList.remove('expanded');
+                    });
+                });
+                
+                // Toggle repository content on header click
+                repoHeader.addEventListener('click', (e) => {
+                    // Only toggle if not clicking on checkbox, its wrapper, or action buttons
+                    if (!e.target.closest('.checkbox-wrapper') && !e.target.closest('.tree-action-button')) {
+                        repoElement.classList.toggle('expanded');
+                    }
+                });
+                
+                repoElement.appendChild(repoHeader);
+                repoElement.appendChild(repoContent);
+                ignoredFileTree.appendChild(repoElement);
+            });
+            
+            // Update the ignored count with selected file information
+            ignoredCount.textContent = `${selectedIgnoredFileCount} of ${totalIgnoredFileCount} files`;
+
+            // Apply search filter if search input has value
+            applyIgnoredSearchFilter();
+        }
+        
         // Get selected file count from a node (repo or directory)
         function getSelectedFileCount(node) {
             if (node.type === 'file') {
@@ -947,7 +1173,7 @@
                 </div>
                 <div class="tree-directory-stats">
                     <span class="tree-directory-file-count">${directory.fileCount} files</span>
-                    <span class="tree-directory-token-count">~${formatTokenCount(directory.tokenCount)} tokens</span>
+                    <span class="tree-directory-token-count">~${directory.isIgnored ? "Unknown" : formatTokenCount(directory.tokenCount)} tokens</span>
                 </div>
             `;
             
@@ -1012,7 +1238,7 @@
             fileElement.dataset.name = file.name;
             fileElement.dataset.path = file.path;
             fileElement.dataset.repo = repoName;
-            fileElement.dataset.tokens = file.tokenCount;
+            fileElement.dataset.tokens = file.tokenCount || 0;
             
             // File name parts
             const nameParts = file.name.split('.');
@@ -1064,7 +1290,7 @@
             fileContent.innerHTML = `
                 <span class="tree-file-icon">${fileIcon}</span>
                 <span class="tree-file-name">${baseName}<span class="tree-file-ext">.${extension}</span></span>
-                <span class="tree-file-tokens">~${formatTokenCount(file.tokenCount)}</span>
+                <span class="tree-file-tokens">~${file.isIgnored ? "Unknown" : formatTokenCount(file.tokenCount || 0)}</span>
             `;
             
             // Add checkbox and file content to the element
@@ -1074,7 +1300,12 @@
             // File click handler
             fileContent.addEventListener('click', (e) => {
                 e.stopPropagation();
-                showFilePreview(file);
+                // Only show preview if there's actual content
+                if (file.content) {
+                    showFilePreview(file);
+                } else if (file.isIgnored) {
+                    showNotification('Cannot preview ignored file content', 'info');
+                }
             });
             
             return fileElement;
@@ -1082,46 +1313,75 @@
         
         // Get current selection state
         function getSelectionState() {
-            if (!fileTreeData || fileTreeData.length === 0) return null;
+            if ((!fileTreeData || fileTreeData.length === 0) && 
+                (!ignoredTreeData || ignoredTreeData.length === 0)) return null;
             
-            const state = {};
+            const state = {
+                included: {},
+                ignored: {}
+            };
             
+            // Save included files selection state
             fileTreeData.forEach(repo => {
-                state[repo.name] = {
+                state.included[repo.name] = {
                     deselectedPaths: getNodeSelectionPaths(repo),
-                    expansionState: getExpansionState(repo.name)
+                    expansionState: getExpansionState(repo.name, false)
+                };
+            });
+            
+            // Save ignored files selection state
+            ignoredTreeData.forEach(repo => {
+                state.ignored[repo.name] = {
+                    selectedPaths: getNodeSelectionPaths(repo, '', true),
+                    expansionState: getExpansionState(repo.name, true)
                 };
             });
             
             return state;
         }
         
-        // Get all paths that are NOT selected (more efficient to store deselected items)
-        function getNodeSelectionPaths(node, basePath = '') {
+        // Get all paths that are NOT selected for included files,
+        // or paths that ARE selected for ignored files
+        function getNodeSelectionPaths(node, basePath = '', isIgnored = false) {
             let paths = [];
             
-            // For files, use full path to ensure unique identification
-            if (node.type === 'file' && !node.selected) {
-                // Use the full file path instead of just the name
-                paths.push(node.path);
-            } else if (node.type === 'directory' && !node.selected && !node.indeterminate) {
-                // For directories, use relative path within the repo
-                paths.push(basePath + (node.name || ''));
-            } else if (node.children) {
-                // For selected or indeterminate nodes, check children
-                Object.entries(node.children).forEach(([childName, child]) => {
-                    const childPath = basePath + (node.name ? node.name + '/' : '') + childName;
-                    paths = paths.concat(getNodeSelectionPaths(child, childPath));
-                });
+            // For files
+            if (node.type === 'file') {
+                // For included files, store deselected paths
+                // For ignored files, store selected paths
+                if ((!isIgnored && !node.selected) || (isIgnored && node.selected)) {
+                    // Use the full file path instead of just the name
+                    paths.push(node.path);
+                }
+            } 
+            // For directories
+            else if (node.type === 'directory' || node.type === 'repo') {
+                // For completely deselected directories in included files
+                // or completely selected directories in ignored files
+                if (((!isIgnored && !node.selected && !node.indeterminate) || 
+                     (isIgnored && node.selected && !node.indeterminate)) && 
+                    node.type === 'directory') {
+                    
+                    // For directories, use relative path within the repo
+                    paths.push(basePath + (node.name || ''));
+                } 
+                // For directories with mixed selection, check children
+                else if (node.children) {
+                    Object.entries(node.children).forEach(([childName, child]) => {
+                        const childPath = basePath + (node.name && node.type === 'directory' ? node.name + '/' : '') + childName;
+                        paths = paths.concat(getNodeSelectionPaths(child, childPath, isIgnored));
+                    });
+                }
             }
             
             return paths;
         }
         
         // Get current expansion state (which directories are expanded)
-        function getExpansionState(repoName) {
+        function getExpansionState(repoName, isIgnored = false) {
             const expandedDirs = [];
-            const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repoName}"]`);
+            const treeContainer = isIgnored ? ignoredFileTree : fileTree;
+            const repoElement = treeContainer.querySelector(`.tree-repo[data-name="${repoName}"]`);
             
             if (repoElement) {
                 // Get all expanded directories
@@ -1145,28 +1405,53 @@
         
         // Apply selection state saved previously
         function applySelectionState(state) {
-            if (!state || !fileTreeData || fileTreeData.length === 0) return;
+            if (!state) return;
             
-            // Apply to each repository
-            fileTreeData.forEach(repo => {
-                const repoState = state[repo.name];
-                if (!repoState) return;
+            // Apply to included files
+            if (state.included && fileTreeData && fileTreeData.length > 0) {
+                fileTreeData.forEach(repo => {
+                    const repoState = state.included[repo.name];
+                    if (!repoState) return;
+                    
+                    // First reset all selections to true (default state for included files)
+                    resetSelectionState(repo, true);
+                    
+                    // Apply deselected paths
+                    if (repoState.deselectedPaths) {
+                        repoState.deselectedPaths.forEach(path => {
+                            applySelectionPath(repo, path, false);
+                        });
+                    }
+                });
                 
-                // First reset all selections to true (default state)
-                resetSelectionState(repo, true);
-                
-                // Apply deselected paths
-                if (repoState.deselectedPaths) {
-                    repoState.deselectedPaths.forEach(path => {
-                        applySelectionPath(repo, path, false);
-                    });
-                }
-            });
+                // Update all parent selection states bottom-up
+                fileTreeData.forEach(repo => {
+                    updateSelectionStatesBottomUp(repo);
+                });
+            }
             
-            // Update all parent selection states bottom-up
-            fileTreeData.forEach(repo => {
-                updateSelectionStatesBottomUp(repo);
-            });
+            // Apply to ignored files
+            if (state.ignored && ignoredTreeData && ignoredTreeData.length > 0) {
+                ignoredTreeData.forEach(repo => {
+                    const repoState = state.ignored[repo.name];
+                    if (!repoState) return;
+                    
+                    // First reset all selections to false (default state for ignored files)
+                    resetSelectionState(repo, false);
+                    
+                    // Apply selected paths
+                    if (repoState.selectedPaths) {
+                        repoState.selectedPaths.forEach(path => {
+                            applySelectionPath(repo, path, true);
+                        });
+                    }
+                });
+                
+                // Update all parent selection states bottom-up
+                ignoredTreeData.forEach(repo => {
+                    updateSelectionStatesBottomUp(repo);
+                });
+            }
         }
         
         // Apply selection to a specific path
@@ -1230,22 +1515,41 @@
         
         // Apply expansion state
         function applyExpansionState(state) {
-            if (!state || !fileTreeData || fileTreeData.length === 0) return;
+            if (!state) return;
             
-            // Apply after the tree has been rendered
+            // Apply after the trees have been rendered
             setTimeout(() => {
-                fileTreeData.forEach(repo => {
-                    const repoState = state[repo.name];
-                    if (!repoState || !repoState.expansionState) return;
-                    
-                    const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);
-                    if (!repoElement) return;
-                    
-                    // Apply each expanded directory path
-                    repoState.expansionState.forEach(path => {
-                        applyExpansionPath(repoElement, path);
+                // Apply to included files
+                if (state.included) {
+                    Object.keys(state.included).forEach(repoName => {
+                        const repoState = state.included[repoName];
+                        if (!repoState || !repoState.expansionState) return;
+                        
+                        const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repoName}"]`);
+                        if (!repoElement) return;
+                        
+                        // Apply each expanded directory path
+                        repoState.expansionState.forEach(path => {
+                            applyExpansionPath(repoElement, path);
+                        });
                     });
-                });
+                }
+                
+                // Apply to ignored files
+                if (state.ignored) {
+                    Object.keys(state.ignored).forEach(repoName => {
+                        const repoState = state.ignored[repoName];
+                        if (!repoState || !repoState.expansionState) return;
+                        
+                        const repoElement = ignoredFileTree.querySelector(`.tree-repo[data-name="${repoName}"]`);
+                        if (!repoElement) return;
+                        
+                        // Apply each expanded directory path
+                        repoState.expansionState.forEach(path => {
+                            applyExpansionPath(repoElement, path);
+                        });
+                    });
+                }
             }, 100);
         }
         
@@ -1270,13 +1574,37 @@
         
         // Update tree selection states bottom-up
         function updateTreeSelectionStates() {
-            // Update from bottom to top
-            fileTreeData.forEach(repo => {
-                updateSelectionStatesBottomUp(repo);
-            });
+            // Update both included and ignored trees
             
-            // Update tree UI to reflect new states
-            const checkboxes = fileTree.querySelectorAll('.tree-checkbox');
+            // Update included files tree from bottom to top
+            if (fileTreeData && fileTreeData.length > 0) {
+                fileTreeData.forEach(repo => {
+                    updateSelectionStatesBottomUp(repo);
+                });
+                
+                // Update tree UI to reflect new states
+                updateTreeCheckboxes(fileTree, fileTreeData);
+            }
+            
+            // Update ignored files tree from bottom to top
+            if (ignoredTreeData && ignoredTreeData.length > 0) {
+                ignoredTreeData.forEach(repo => {
+                    updateSelectionStatesBottomUp(repo);
+                });
+                
+                // Update tree UI to reflect new states if the ignored tree is expanded
+                if (!ignoredContent.classList.contains('hidden')) {
+                    updateTreeCheckboxes(ignoredFileTree, ignoredTreeData);
+                }
+            }
+            
+            // Save selection state
+            saveSelectionState();
+        }
+        
+        // Update all checkboxes in a tree to match data model
+        function updateTreeCheckboxes(treeContainer, treeData) {
+            const checkboxes = treeContainer.querySelectorAll('.tree-checkbox');
             checkboxes.forEach(checkbox => {
                 const parentElement = checkbox.closest('.tree-repo, .tree-directory, .tree-file');
                 
@@ -1286,14 +1614,14 @@
                     
                     if (parentElement.classList.contains('tree-repo')) {
                         const repoName = parentElement.dataset.name;
-                        node = fileTreeData.find(r => r.name === repoName);
+                        node = treeData.find(r => r.name === repoName);
                     }
                     else if (parentElement.classList.contains('tree-directory')) {
                         const dirName = parentElement.dataset.name;
                         const repoElement = parentElement.closest('.tree-repo');
                         if (repoElement) {
                             const repoName = repoElement.dataset.name;
-                            const repo = fileTreeData.find(r => r.name === repoName);
+                            const repo = treeData.find(r => r.name === repoName);
                             if (repo) {
                                 // Find directory by name
                                 node = findNodeByName(repo, dirName);
@@ -1304,7 +1632,7 @@
                         const filePath = parentElement.dataset.path;
                         const repoName = parentElement.dataset.repo;
                         if (repoName) {
-                            const repo = fileTreeData.find(r => r.name === repoName);
+                            const repo = treeData.find(r => r.name === repoName);
                             if (repo) {
                                 // Find file by path
                                 node = findNodeByPath(repo, filePath);
@@ -1318,9 +1646,6 @@
                     }
                 }
             });
-            
-            // Save selection state
-            saveSelectionState();
         }
         
         // Find a node by name in a tree
@@ -1372,18 +1697,35 @@
         
         // Save selection state to localStorage
         function saveSelectionState() {
-            if (!fileTreeData || fileTreeData.length === 0) return;
+            if ((!fileTreeData || fileTreeData.length === 0) && 
+                (!ignoredTreeData || ignoredTreeData.length === 0)) return;
             
             try {
-                // Get current state for each repository
-                const state = {};
+                // Get current state for included and ignored files
+                const state = {
+                    included: {},
+                    ignored: {}
+                };
                 
-                fileTreeData.forEach(repo => {
-                    state[repo.name] = {
-                        deselectedPaths: getNodeSelectionPaths(repo),
-                        expansionState: getExpansionState(repo.name)
-                    };
-                });
+                // Save included files state
+                if (fileTreeData && fileTreeData.length > 0) {
+                    fileTreeData.forEach(repo => {
+                        state.included[repo.name] = {
+                            deselectedPaths: getNodeSelectionPaths(repo),
+                            expansionState: getExpansionState(repo.name, false)
+                        };
+                    });
+                }
+                
+                // Save ignored files state
+                if (ignoredTreeData && ignoredTreeData.length > 0) {
+                    ignoredTreeData.forEach(repo => {
+                        state.ignored[repo.name] = {
+                            selectedPaths: getNodeSelectionPaths(repo, '', true),
+                            expansionState: getExpansionState(repo.name, true)
+                        };
+                    });
+                }
                 
                 // Save to localStorage with a key that includes the repository paths
                 const repoKey = selectedRepos.map(r => r.path).sort().join(',');
@@ -1405,26 +1747,37 @@
                 if (savedState) {
                     const state = JSON.parse(savedState);
                     
-                    // Convert old format to new format if needed
-                    const newState = {};
-                    Object.keys(state).forEach(repoName => {
-                        if (Array.isArray(state[repoName])) {
-                            // Old format - just deselected paths
-                            newState[repoName] = {
-                                deselectedPaths: state[repoName],
-                                expansionState: []
-                            };
-                        } else {
-                            // New format - already has the right structure
-                            newState[repoName] = state[repoName];
-                        }
-                    });
+                    // Convert old format to new format if needed (compatibility)
+                    if (!state.included && !state.ignored) {
+                        // Old format - convert to new format
+                        const newState = {
+                            included: {},
+                            ignored: {}
+                        };
+                        
+                        Object.keys(state).forEach(repoName => {
+                            if (Array.isArray(state[repoName])) {
+                                // Old format - just deselected paths for included files
+                                newState.included[repoName] = {
+                                    deselectedPaths: state[repoName],
+                                    expansionState: []
+                                };
+                            } else {
+                                // Newer format with nested structure but not separate included/ignored
+                                newState.included[repoName] = state[repoName];
+                            }
+                        });
+                        
+                        // Apply the converted state
+                        applySelectionState(newState);
+                        applyExpansionState(newState);
+                    } else {
+                        // New format with separate included/ignored sections
+                        applySelectionState(state);
+                        applyExpansionState(state);
+                    }
                     
-                    // Apply the state to the tree
-                    applySelectionState(newState);
-                    applyExpansionState(newState);
-                    
-                    // Re-render tree with updated selections
+                    // Re-render trees with updated selections
                     updateFileSummaryWithoutRender();
                 }
             } catch (e) {
@@ -1438,25 +1791,33 @@
             let totalIncludedFiles = 0;
             let totalSelectedFiles = 0;
             let totalIgnoredFiles = 0;
+            let totalSelectedIgnoredFiles = 0;
             totalTokenCount = 0;
             let selectedTokenCount = 0;
             
-            selectedRepos.forEach(repo => {
-                totalIncludedFiles += repo.included.length;
-                totalIgnoredFiles += repo.ignored.length;
-                
-                // Find the corresponding repo in fileTreeData to get token count
-                const repoData = fileTreeData.find(r => r.name === repo.name);
-                if (repoData) {
-                    totalTokenCount += repoData.tokenCount;
-                    selectedTokenCount += getSelectedTokenCount(repoData);
-                    totalSelectedFiles += getSelectedFileCount(repoData);
-                }
-            });
+            // Calculate included files stats
+            if (fileTreeData && fileTreeData.length > 0) {
+                fileTreeData.forEach(repo => {
+                    totalIncludedFiles += repo.fileCount;
+                    totalTokenCount += repo.tokenCount;
+                    selectedTokenCount += getSelectedTokenCount(repo);
+                    totalSelectedFiles += getSelectedFileCount(repo);
+                });
+            }
+            
+            // Calculate ignored files stats
+            if (ignoredTreeData && ignoredTreeData.length > 0) {
+                ignoredTreeData.forEach(repo => {
+                    totalIgnoredFiles += repo.fileCount;
+                    totalSelectedIgnoredFiles += getSelectedFileCount(repo);
+                    // Add tokens from selected ignored files
+                    selectedTokenCount += getSelectedTokenCount(repo);
+                });
+            }
             
             // Update counts
             includedCount.textContent = `${totalSelectedFiles} of ${totalIncludedFiles} files · ~${formatTokenCount(selectedTokenCount)} tokens`;
-            ignoredCount.textContent = `${totalIgnoredFiles} files`;
+            ignoredCount.textContent = `${totalSelectedIgnoredFiles} of ${totalIgnoredFiles} files`;
             selectedReposCount.textContent = selectedRepos.length;
 
             // Update total tokens count above the Copy button
@@ -1478,25 +1839,33 @@
             let totalIncludedFiles = 0;
             let totalSelectedFiles = 0;
             let totalIgnoredFiles = 0;
+            let totalSelectedIgnoredFiles = 0;
             totalTokenCount = 0;
             let selectedTokenCount = 0;
 
-            selectedRepos.forEach(repo => {
-                totalIncludedFiles += repo.included.length;
-                totalIgnoredFiles += repo.ignored.length;
-
-                // Find the corresponding repo in fileTreeData to get token count
-                const repoData = fileTreeData.find(r => r.name === repo.name);
-                if (repoData) {
-                    totalTokenCount += repoData.tokenCount;
-                    selectedTokenCount += getSelectedTokenCount(repoData);
-                    totalSelectedFiles += getSelectedFileCount(repoData);
-                }
-            });
+            // Calculate included files stats
+            if (fileTreeData && fileTreeData.length > 0) {
+                fileTreeData.forEach(repo => {
+                    totalIncludedFiles += repo.fileCount;
+                    totalTokenCount += repo.tokenCount;
+                    selectedTokenCount += getSelectedTokenCount(repo);
+                    totalSelectedFiles += getSelectedFileCount(repo);
+                });
+            }
+            
+            // Calculate ignored files stats
+            if (ignoredTreeData && ignoredTreeData.length > 0) {
+                ignoredTreeData.forEach(repo => {
+                    totalIgnoredFiles += repo.fileCount;
+                    totalSelectedIgnoredFiles += getSelectedFileCount(repo);
+                    // Add tokens from selected ignored files
+                    selectedTokenCount += getSelectedTokenCount(repo);
+                });
+            }
 
             // Update counts
             includedCount.textContent = `${totalSelectedFiles} of ${totalIncludedFiles} files · ~${formatTokenCount(selectedTokenCount)} tokens`;
-            ignoredCount.textContent = `${totalIgnoredFiles} files`;
+            ignoredCount.textContent = `${totalSelectedIgnoredFiles} of ${totalIgnoredFiles} files`;
             selectedReposCount.textContent = selectedRepos.length;
 
             // Update total tokens count above the Copy button
@@ -1514,8 +1883,8 @@
 
         // Show file preview
         function showFilePreview(file) {
-            filePreviewFilename.textContent = `${file.name} (~${formatTokenCount(file.tokenCount)} tokens)`;
-            filePreviewCode.textContent = file.content;
+            filePreviewFilename.textContent = `${file.name} (~${file.isIgnored ? "Unknown" : formatTokenCount(file.tokenCount || 0)} tokens)`;
+            filePreviewCode.textContent = file.content || "Preview not available for ignored files";
             filePreviewModal.classList.add('visible');
         }
         
@@ -1633,6 +2002,115 @@
             }
         }
         
+        // Search ignored file tree - nearly identical to searchFileTree but for ignored files
+        function searchIgnoredFileTree(query) {
+            if (!query) {
+                // Clear search
+                resetIgnoredTreeSearch();
+                return;
+            }
+            
+            const lowerQuery = query.toLowerCase();
+            let foundAny = false;
+            
+            // Search in each repo
+            const repoElements = ignoredFileTree.querySelectorAll('.tree-repo');
+            repoElements.forEach(repoEl => {
+                let foundInRepo = false;
+                
+                // Search files in this repo
+                const fileElements = repoEl.querySelectorAll('.tree-file');
+                fileElements.forEach(fileEl => {
+                    const fileName = fileEl.dataset.name.toLowerCase();
+                    const filePath = fileEl.dataset.path.toLowerCase();
+                    
+                    if (fileName.includes(lowerQuery) || filePath.includes(lowerQuery)) {
+                        fileEl.style.display = 'flex';
+                        highlightMatch(fileEl, lowerQuery);
+                        foundInRepo = true;
+                        foundAny = true;
+                        
+                        // Make sure parent directories are expanded and visible
+                        let parent = fileEl.parentElement;
+                        while (parent && !parent.classList.contains('tree-repo-content')) {
+                            if (parent.classList.contains('tree-directory-content')) {
+                                parent.parentElement.classList.add('expanded');
+                                parent.style.display = 'block';
+                            }
+                            parent = parent.parentElement;
+                        }
+                    } else {
+                        fileEl.style.display = 'none';
+                    }
+                });
+                
+                // Search directories
+                const dirElements = repoEl.querySelectorAll('.tree-directory');
+                dirElements.forEach(dirEl => {
+                    const dirName = dirEl.dataset.name.toLowerCase();
+                    const hasVisibleChildren = dirEl.querySelector('.tree-file[style*="display: flex"]');
+                    
+                    if (dirName.includes(lowerQuery)) {
+                        // Highlight the directory name and make it visible
+                        const nameElement = dirEl.querySelector('.tree-directory-name span:last-child');
+                        nameElement.innerHTML = nameElement.textContent.replace(
+                            new RegExp(lowerQuery, 'ig'),
+                            match => `<span class="match-highlight">${match}</span>`
+                        );
+                        
+                        // Show and expand the directory
+                        dirEl.style.display = 'block';
+                        dirEl.classList.add('expanded');
+                        foundInRepo = true;
+                        foundAny = true;
+                        
+                        // Make parent directories visible and expanded
+                        let parent = dirEl.parentElement;
+                        while (parent && !parent.classList.contains('tree-repo-content')) {
+                            if (parent.classList.contains('tree-directory-content')) {
+                                parent.parentElement.classList.add('expanded');
+                                parent.style.display = 'block';
+                            }
+                            parent = parent.parentElement;
+                        }
+                    } else if (hasVisibleChildren) {
+                        // Directory has matching files, keep it visible and expanded
+                        dirEl.style.display = 'block';
+                        dirEl.classList.add('expanded');
+                    } else if (!hasVisibleChildren && !dirName.includes(lowerQuery)) {
+                        // Hide the directory if it neither matches nor has matching children
+                        dirEl.style.display = 'none';
+                    }
+                });
+                
+                // Show/hide the entire repo based on matches
+                if (foundInRepo) {
+                    repoEl.style.display = 'block';
+                    repoEl.classList.add('expanded');
+                } else {
+                    repoEl.style.display = 'none';
+                }
+            });
+            
+            // Show no results message if nothing found
+            if (!foundAny) {
+                if (!ignoredFileTree.querySelector('.tree-empty')) {
+                    const emptyMessage = document.createElement('div');
+                    emptyMessage.classList.add('tree-empty');
+                    emptyMessage.innerHTML = `
+                        <div class="tree-empty-icon">🔍</div>
+                        <p>No ignored files match your search</p>
+                    `;
+                    ignoredFileTree.appendChild(emptyMessage);
+                }
+            } else {
+                const emptyMessage = ignoredFileTree.querySelector('.tree-empty');
+                if (emptyMessage) {
+                    emptyMessage.remove();
+                }
+            }
+        }
+        
         // Highlight search matches
         function highlightMatch(element, query) {
             // Highlight in the file name
@@ -1704,6 +2182,43 @@
             renderFileTree();
         }
         
+        // Reset ignored tree search
+        function resetIgnoredTreeSearch() {
+            // Show all elements
+            const allRepos = ignoredFileTree.querySelectorAll('.tree-repo');
+            const allDirs = ignoredFileTree.querySelectorAll('.tree-directory');
+            const allFiles = ignoredFileTree.querySelectorAll('.tree-file');
+            
+            allRepos.forEach(el => {
+                el.style.display = 'block';
+                el.classList.remove('expanded');
+            });
+            
+            allDirs.forEach(el => {
+                el.style.display = 'block';
+                el.classList.remove('expanded');
+            });
+            
+            allFiles.forEach(el => {
+                el.style.display = 'flex';
+                
+                // Remove highlights
+                const nameElement = el.querySelector('.tree-file-name');
+                if (nameElement) {
+                    nameElement.innerHTML = `${nameElement.textContent.split('.')[0]}<span class="tree-file-ext">.${nameElement.textContent.split('.')[1] || ''}</span>`;
+                }
+            });
+            
+            // Remove empty message if present
+            const emptyMessage = ignoredFileTree.querySelector('.tree-empty');
+            if (emptyMessage) {
+                emptyMessage.remove();
+            }
+            
+            // Re-expand first level directories if needed
+            renderIgnoredFileTree();
+        }
+        
         // Apply current search filter
         function applySearchFilter() {
             const query = treeSearchInput.value.trim();
@@ -1712,11 +2227,19 @@
             }
         }
         
+        // Apply current search filter for ignored files
+        function applyIgnoredSearchFilter() {
+            const query = ignoredTreeSearchInput.value.trim();
+            if (query) {
+                searchIgnoredFileTree(query);
+            }
+        }
+        
         // Get selected token count for a node (recursive)
         function getSelectedTokenCount(node) {
             if (node.type === 'file') {
                 // Base case: file
-                return node.selected ? node.tokenCount : 0;
+                return node.selected ? (node.tokenCount || 0) : 0;
             }
 
             // If the directory/repo itself is completely deselected, return 0
@@ -1745,19 +2268,19 @@
                 if (node.selected) {
                     files.push({
                         path: node.path,
-                        content: node.content
+                        content: node.content || ""
                     });
                 }
                 return files;
             }
             
-            // If this node is not selected, none of its children are included
-            if (!node.selected) {
-                return files;
-            }
-            
             // For directories and repos, collect from all children
             if (node.children) {
+                // Skip completely deselected directories/repos
+                if (!node.selected && !node.indeterminate) {
+                    return files;
+                }
+                
                 Object.values(node.children).forEach(child => {
                     files.push(...getSelectedFiles(child));
                 });
@@ -1773,38 +2296,81 @@
             selectedRepos.forEach(repo => {
                 // Find the corresponding repo in fileTreeData to get token count
                 const repoData = fileTreeData.find(r => r.name === repo.name);
+                const ignoredRepoData = ignoredTreeData.find(r => r.name === repo.name);
+                
                 const totalTokenCount = repoData ? repoData.tokenCount : 0;
                 const selectedTokenCount = repoData ? getSelectedTokenCount(repoData) : 0;
-                const totalFiles = repo.included.length;
-                const selectedFiles = repoData ? getSelectedFileCount(repoData) : 0;
+                
+                // Count tokens from selected ignored files
+                const selectedIgnoredTokenCount = ignoredRepoData ? getSelectedTokenCount(ignoredRepoData) : 0;
+                
+                const totalFiles = (repoData ? repoData.fileCount : 0) + (ignoredRepoData ? ignoredRepoData.fileCount : 0);
+                const selectedFiles = (repoData ? getSelectedFileCount(repoData) : 0) + 
+                                      (ignoredRepoData ? getSelectedFileCount(ignoredRepoData) : 0);
                 
                 const repoItem = document.createElement('div');
                 repoItem.classList.add('repo-item');
                 repoItem.innerHTML = `
                     <span class="repo-name">📂 ${repo.name}</span>
-                    <span class="repo-files">${selectedFiles} of ${totalFiles} files · ~${formatTokenCount(selectedTokenCount)} tokens</span>
+                    <span class="repo-files">${selectedFiles} of ${totalFiles} files · ~${formatTokenCount(selectedTokenCount + selectedIgnoredTokenCount)} tokens</span>
                 `;
                 selectedReposList.appendChild(repoItem);
             });
         }
-        
         // Copy to clipboard
         function copyToClipboard() {
             if (selectedRepos.length === 0) return;
             
-            // Collect all selected files from the file tree
+            // Collect all selected files from both trees
             const selectedFilesData = [];
-            fileTreeData.forEach(repo => {
-                const repoFiles = getSelectedFiles(repo);
-                
-                if (repoFiles.length > 0) {
-                    selectedFilesData.push({
-                        name: repo.name,
-                        path: selectedRepos.find(r => r.name === repo.name)?.path || '',
-                        files: repoFiles
-                    });
-                }
-            });
+            
+            // Get selected files from included files tree
+            if (fileTreeData && fileTreeData.length > 0) {
+                fileTreeData.forEach(repo => {
+                    const repoFiles = getSelectedFiles(repo);
+                    
+                    if (repoFiles.length > 0) {
+                        // Find if this repo is already in selectedFilesData
+                        let repoEntry = selectedFilesData.find(r => r.name === repo.name);
+                        
+                        if (!repoEntry) {
+                            repoEntry = {
+                                name: repo.name,
+                                path: selectedRepos.find(r => r.name === repo.name)?.path || '',
+                                files: []
+                            };
+                            selectedFilesData.push(repoEntry);
+                        }
+                        
+                        // Add files to this repo entry
+                        repoEntry.files = repoEntry.files.concat(repoFiles);
+                    }
+                });
+            }
+            
+            // Get selected files from ignored files tree
+            if (ignoredTreeData && ignoredTreeData.length > 0) {
+                ignoredTreeData.forEach(repo => {
+                    const ignoredRepoFiles = getSelectedFiles(repo);
+                    
+                    if (ignoredRepoFiles.length > 0) {
+                        // Find if this repo is already in selectedFilesData
+                        let repoEntry = selectedFilesData.find(r => r.name === repo.name);
+                        
+                        if (!repoEntry) {
+                            repoEntry = {
+                                name: repo.name,
+                                path: selectedRepos.find(r => r.name === repo.name)?.path || '',
+                                files: []
+                            };
+                            selectedFilesData.push(repoEntry);
+                        }
+                        
+                        // Add ignored files to this repo entry
+                        repoEntry.files = repoEntry.files.concat(ignoredRepoFiles);
+                    }
+                });
+            }
             
             // Send only selected files to be copied
             axios.post('/api/copy-to-clipboard', { selectedRepos: selectedFilesData })
@@ -1879,24 +2445,50 @@
             
             // Save scroll positions before refresh
             const fileTreeScrollTop = fileTree.scrollTop;
+            const ignoredTreeScrollTop = ignoredFileTree.scrollTop;
             
             // First, map all file paths to their current selection state for direct comparison
             const fileSelectionMap = {};
-            fileTreeData.forEach(repo => {
-                collectFileSelections(repo, fileSelectionMap);
-            });
+            const ignoredSelectionMap = {};
+            
+            // Save selection state for included files
+            if (fileTreeData && fileTreeData.length > 0) {
+                fileTreeData.forEach(repo => {
+                    collectFileSelections(repo, fileSelectionMap);
+                });
+            }
+            
+            // Save selection state for ignored files
+            if (ignoredTreeData && ignoredTreeData.length > 0) {
+                ignoredTreeData.forEach(repo => {
+                    collectFileSelections(repo, ignoredSelectionMap);
+                });
+            }
             
             // Also capture expansion state
             const expandedDirs = {};
-            fileTreeData.forEach(repo => {
-                expandedDirs[repo.name] = getExpansionState(repo.name);
-            });
+            const expandedIgnoredDirs = {};
+            
+            // Save expansion state for included files
+            if (fileTreeData && fileTreeData.length > 0) {
+                fileTreeData.forEach(repo => {
+                    expandedDirs[repo.name] = getExpansionState(repo.name, false);
+                });
+            }
+            
+            // Save expansion state for ignored files
+            if (ignoredTreeData && ignoredTreeData.length > 0) {
+                ignoredTreeData.forEach(repo => {
+                    expandedIgnoredDirs[repo.name] = getExpansionState(repo.name, true);
+                });
+            }
             
             // Track completion for multiple repos
             let refreshedCount = 0;
             const tempSelectedRepos = [...selectedRepos];
             selectedRepos = [];
             fileTreeData = [];
+            ignoredTreeData = [];
             
             // Process each repository
             tempSelectedRepos.forEach((repo, index) => {
@@ -1914,17 +2506,31 @@
                             // Add to selected repos
                             selectedRepos.push(updatedRepo);
                             
-                            // Build new tree with default selections
-                            const repoTreeData = buildFileTree(updatedRepo.included, updatedRepo.name);
+                            // Build new included files tree with default selections
+                            const repoTreeData = buildFileTree(updatedRepo.included, updatedRepo.name, false);
                             
-                            // Apply saved selections to the new tree
+                            // Apply saved selections to the included files tree
                             applyFileSelections(repoTreeData, fileSelectionMap);
                             
                             // Add to file tree data
                             fileTreeData.push(repoTreeData);
                             
+                            // Build new ignored files tree with default selections (false for ignored files)
+                            const repoIgnoredTreeData = buildFileTree(
+                                updatedRepo.ignored.map(path => ({ path, content: "" })), 
+                                updatedRepo.name, 
+                                true
+                            );
+                            
+                            // Apply saved selections to the ignored files tree
+                            applyFileSelections(repoIgnoredTreeData, ignoredSelectionMap);
+                            
+                            // Add to ignored tree data
+                            ignoredTreeData.push(repoIgnoredTreeData);
+                            
                             // Update selection states from bottom to top
                             updateSelectionStatesBottomUp(repoTreeData);
+                            updateSelectionStatesBottomUp(repoIgnoredTreeData);
                             
                             // Update progress
                             refreshedCount++;
@@ -1937,25 +2543,56 @@
                                 // Render tree with applied selections
                                 renderFileTree();
                                 
+                                // Render ignored tree if expanded
+                                if (!ignoredContent.classList.contains('hidden')) {
+                                    renderIgnoredFileTree();
+                                }
+                                
                                 // Then restore expanded directories
                                 setTimeout(() => {
-                                    // Restore scroll position
+                                    // Restore scroll position for included files
                                     fileTree.scrollTop = fileTreeScrollTop;
                                     
-                                    fileTreeData.forEach(repo => {
-                                        if (expandedDirs[repo.name] && expandedDirs[repo.name].length > 0) {
-                                            const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);
-                                            if (repoElement) {
-                                                // Expand the repo itself
-                                                repoElement.classList.add('expanded');
-                                                
-                                                // Apply saved expansion state to each directory
-                                                expandedDirs[repo.name].forEach(path => {
-                                                    applyExpansionPath(repoElement, path);
-                                                });
+                                    // Apply saved expansion state to included files
+                                    if (fileTreeData && fileTreeData.length > 0) {
+                                        fileTreeData.forEach(repo => {
+                                            if (expandedDirs[repo.name] && expandedDirs[repo.name].length > 0) {
+                                                const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);
+                                                if (repoElement) {
+                                                    // Expand the repo itself
+                                                    repoElement.classList.add('expanded');
+                                                    
+                                                    // Apply saved expansion state to each directory
+                                                    expandedDirs[repo.name].forEach(path => {
+                                                        applyExpansionPath(repoElement, path);
+                                                    });
+                                                }
                                             }
+                                        });
+                                    }
+                                    
+                                    // Restore scroll position for ignored files if expanded
+                                    if (!ignoredContent.classList.contains('hidden')) {
+                                        ignoredFileTree.scrollTop = ignoredTreeScrollTop;
+                                        
+                                        // Apply saved expansion state to ignored files
+                                        if (ignoredTreeData && ignoredTreeData.length > 0) {
+                                            ignoredTreeData.forEach(repo => {
+                                                if (expandedIgnoredDirs[repo.name] && expandedIgnoredDirs[repo.name].length > 0) {
+                                                    const repoElement = ignoredFileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);
+                                                    if (repoElement) {
+                                                        // Expand the repo itself
+                                                        repoElement.classList.add('expanded');
+                                                        
+                                                        // Apply saved expansion state to each directory
+                                                        expandedIgnoredDirs[repo.name].forEach(path => {
+                                                            applyExpansionPath(repoElement, path);
+                                                        });
+                                                    }
+                                                }
+                                            });
                                         }
-                                    });
+                                    }
                                 }, 50);
                                 
                                 // Enable buttons
@@ -2117,7 +2754,7 @@
             }
         });
         
-        // Search events
+        // Search events for included files
         treeSearchInput.addEventListener('input', (e) => {
             const query = e.target.value.trim();
             searchFileTree(query);
@@ -2126,6 +2763,17 @@
         treeSearchClear.addEventListener('click', () => {
             treeSearchInput.value = '';
             resetTreeSearch();
+        });
+        
+        // Search events for ignored files
+        ignoredTreeSearchInput.addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+            searchIgnoredFileTree(query);
+        });
+        
+        ignoredTreeSearchClear.addEventListener('click', () => {
+            ignoredTreeSearchInput.value = '';
+            resetIgnoredTreeSearch();
         });
         
         notificationClose.addEventListener('click', () => {
@@ -2139,10 +2787,41 @@
         window.addEventListener('load', function() {
             // If we have selectedRepos data but no selection state in memory,
             // try to restore from localStorage
-            if (selectedRepos && selectedRepos.length > 0 && fileTreeData && fileTreeData.length > 0) {
+            if (selectedRepos && selectedRepos.length > 0 && 
+                ((fileTreeData && fileTreeData.length > 0) || 
+                 (ignoredTreeData && ignoredTreeData.length > 0))) {
                 restoreSelectionState();
             }
         });
     });
 </script>
+
+<style>
+    /* Ignored files section styles */
+    .ignored-files-section {
+        margin-top: 1.5rem;
+    }
+    
+    .ignored-header {
+        cursor: pointer;
+    }
+    
+    .expand-collapse-btn {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        margin-left: 0.5rem;
+    }
+    
+    .expand-collapse-btn:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .ignored-content {
+        padding-top: 1rem;
+    }
+</style>
 {% endblock %}
