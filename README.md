@@ -1,6 +1,6 @@
 # Repo Tools
 
-**Copy Content Easily**
+![WebUI Home Page](ss1.png)
 
 ## Install
 
@@ -11,7 +11,7 @@ source venv/bin/activate
 pip install -e .
 ```
 
-## How to use
+## How To Use
 
 ```bash
 # Use CLI Menu
@@ -22,9 +22,9 @@ repo-web
 ```
 
 ## Features
-- Copy local or remote repositories file context easily
-- Parse XML straight into your local repository
-- Craft prompts with automated context addition
+- **Copy local or remote repositories file context easily**
+- **Parse XML straight into your local repository**
+- **Craft prompts with automated context addition**
 
 ## More CLI Options
 
