@@ -151,9 +151,12 @@ def normalize_line_endings(text: str) -> str:
 def parse_xml_string(xml_string: str) -> List[FileChange]:
     """Parse an XML string into a list of FileChange objects.
     
-    Supports multiple XML formats:
-    1. <changed_files><file><file_operation>...</file></changed_files>
-    2. <code_changes><file path="..." action="..."><change>...</change></file></code_changes>
+    This function is flexible and can handle various XML formats as long as they contain
+    file elements with the required attributes and content. It supports:
+    1. Elements with path/action attributes
+    2. Elements with nested operation/path/content tags
+    3. Various attribute formats (quoted, unquoted, different orders)
+    4. XML with or without a root element
     
     Args:
         xml_string: The XML string to parse
@@ -175,13 +178,109 @@ def parse_xml_string(xml_string: str) -> List[FileChange]:
         if not xml_string:
             raise XMLParserError("Empty XML string provided")
         
-        # Detect which format we're dealing with
-        if "<code_changes>" in xml_string:
-            return parse_code_changes_format(xml_string)
-        elif "<changed_files>" in xml_string:
-            return parse_changed_files_format(xml_string)
-        else:
-            raise XMLParserError("Unknown XML format. Expected either <code_changes> or <changed_files>")
+        # Check if the XML has a root element
+        if not xml_string.startswith('<') or not xml_string.endswith('>'):
+            raise XMLParserError("Invalid XML format")
+            
+        # If the XML doesn't have a root element, wrap it in a temporary one
+        if not re.match(r'^<[^>]+>.*</[^>]+>$', xml_string, re.DOTALL):
+            xml_string = f"<root>{xml_string}</root>"
+        
+        # First try to parse using the code_changes format (more flexible)
+        try:
+            changes = parse_code_changes_format(xml_string)
+            if changes:
+                return changes
+        except Exception as e:
+            logger.debug(f"Failed to parse as code_changes format: {str(e)}")
+        
+        # If that fails, try the changed_files format
+        try:
+            changes = parse_changed_files_format(xml_string)
+            if changes:
+                return changes
+        except Exception as e:
+            logger.debug(f"Failed to parse as changed_files format: {str(e)}")
+        
+        # If both specific formats fail, try a more generic approach
+        try:
+            # Use minidom for parsing
+            dom = minidom.parseString(xml_string)
+            
+            # Find all file elements
+            file_nodes = dom.getElementsByTagName("file")
+            if not file_nodes:
+                raise XMLParserError("No 'file' elements found in XML")
+            
+            changes = []
+            for file_node in file_nodes:
+                try:
+                    # Try to get operation and path from attributes first
+                    operation = None
+                    path = None
+                    
+                    if file_node.hasAttribute("action"):
+                        operation = file_node.getAttribute("action").strip().upper()
+                    elif file_node.hasAttribute("operation"):
+                        operation = file_node.getAttribute("operation").strip().upper()
+                    
+                    if file_node.hasAttribute("path"):
+                        path = file_node.getAttribute("path").strip()
+                    
+                    # If attributes not found, try child elements
+                    if not operation:
+                        operation_nodes = file_node.getElementsByTagName("operation")
+                        if operation_nodes and operation_nodes[0].firstChild:
+                            operation = operation_nodes[0].firstChild.nodeValue.strip().upper()
+                    
+                    if not path:
+                        path_nodes = file_node.getElementsByTagName("path")
+                        if path_nodes and path_nodes[0].firstChild:
+                            path = path_nodes[0].firstChild.nodeValue.strip()
+                    
+                    # Validate required fields
+                    if not path:
+                        logger.warning("No path found for file element, skipping")
+                        continue
+                    
+                    if not operation:
+                        logger.warning("No operation found for file element, skipping")
+                        continue
+                    
+                    # Get content if available
+                    code = None
+                    content_nodes = file_node.getElementsByTagName("content")
+                    if content_nodes and content_nodes[0].firstChild:
+                        code = content_nodes[0].firstChild.nodeValue
+                    
+                    # Get search pattern if available
+                    search = None
+                    search_nodes = file_node.getElementsByTagName("search")
+                    if search_nodes and search_nodes[0].firstChild:
+                        search = search_nodes[0].firstChild.nodeValue
+                    
+                    # Get summary if available
+                    summary = None
+                    summary_nodes = file_node.getElementsByTagName("summary")
+                    if summary_nodes and summary_nodes[0].firstChild:
+                        summary = summary_nodes[0].firstChild.nodeValue.strip()
+                    
+                    # Create FileChange object
+                    change = FileChange(operation, path, code, search, summary)
+                    changes.append(change)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing file element: {str(e)}")
+                    continue
+            
+            if changes:
+                return changes
+                
+        except Exception as e:
+            logger.debug(f"Failed to parse using generic approach: {str(e)}")
+        
+        # If all parsing attempts fail, raise an error
+        raise XMLParserError("Could not parse XML in any supported format")
             
     except Exception as e:
         logger.error(f"Error in parse_xml_string: {str(e)}")
@@ -896,12 +995,224 @@ def apply_changes(changes: List[FileChange], repo_path: str) -> List[Tuple[FileC
     
     return results
 
+def find_file_in_repo(target_path: str, repo_path: str) -> Tuple[Optional[str], List[str]]:
+    """Find a file in the repository using fuzzy path matching.
+    
+    This function uses a hierarchical approach to find files:
+    1. Exact path match
+    2. Case-insensitive path match
+    3. Parent directory + filename match
+    4. Filename-only match with parent directory context
+    5. Case-insensitive filename match with parent directory context
+    6. Partial path matching
+    7. Fuzzy filename matching with parent directory context
+    
+    Args:
+        target_path: The path to look for (can be relative or absolute)
+        repo_path: The root path of the repository
+        
+    Returns:
+        Tuple of (best matching path if found, list of all possible matches)
+    """
+    # Normalize paths
+    target_path = os.path.normpath(target_path)
+    repo_path = os.path.normpath(repo_path)
+    
+    # If target is absolute, make it relative to repo
+    if os.path.isabs(target_path):
+        try:
+            target_path = os.path.relpath(target_path, repo_path)
+        except ValueError:
+            return None, []
+    
+    # Get all files in the repository
+    all_files = []
+    for root, _, files in os.walk(repo_path):
+        for file in files:
+            rel_path = os.path.relpath(os.path.join(root, file), repo_path)
+            all_files.append(rel_path)
+    
+    # Try exact match first
+    if target_path in all_files:
+        return target_path, [target_path]
+    
+    # Try case-insensitive match
+    target_lower = target_path.lower()
+    case_insensitive_matches = [f for f in all_files if f.lower() == target_lower]
+    if case_insensitive_matches:
+        return case_insensitive_matches[0], case_insensitive_matches
+    
+    # Extract target filename and parent directory
+    target_filename = os.path.basename(target_path)
+    target_parent = os.path.dirname(target_path)
+    
+    # Try matching by parent directory + filename
+    if target_parent:
+        parent_filename_matches = [
+            f for f in all_files 
+            if os.path.basename(f) == target_filename and 
+            (os.path.dirname(f) == target_parent or 
+             os.path.dirname(f).endswith(os.sep + target_parent) or
+             target_parent.endswith(os.sep + os.path.dirname(f)))
+        ]
+        if parent_filename_matches:
+            return parent_filename_matches[0], parent_filename_matches
+    
+    # Try case-insensitive parent directory + filename match
+    if target_parent:
+        parent_filename_case_insensitive_matches = [
+            f for f in all_files 
+            if os.path.basename(f).lower() == target_filename.lower() and 
+            (os.path.dirname(f).lower() == target_parent.lower() or 
+             os.path.dirname(f).lower().endswith(os.sep + target_parent.lower()) or
+             target_parent.lower().endswith(os.sep + os.path.dirname(f).lower()))
+        ]
+        if parent_filename_case_insensitive_matches:
+            return parent_filename_case_insensitive_matches[0], parent_filename_case_insensitive_matches
+    
+    # Try matching by filename only, but prioritize based on parent directory similarity
+    filename_matches = [f for f in all_files if os.path.basename(f) == target_filename]
+    if filename_matches:
+        # Score matches based on parent directory similarity
+        scored_matches = []
+        for match in filename_matches:
+            match_parent = os.path.dirname(match)
+            score = 0
+            
+            # Check if parent directories share any common parts
+            if target_parent:
+                target_parts = target_parent.split(os.sep)
+                match_parts = match_parent.split(os.sep)
+                
+                # Count matching parts in sequence
+                for i in range(min(len(target_parts), len(match_parts))):
+                    if target_parts[i] == match_parts[i]:
+                        score += 1
+                    else:
+                        break
+                
+                # Check if one is a substring of the other
+                if target_parent in match_parent or match_parent in target_parent:
+                    score += 2
+            
+            scored_matches.append((match, score))
+        
+        # Sort by score and return the best match
+        scored_matches.sort(key=lambda x: x[1], reverse=True)
+        return scored_matches[0][0], [m[0] for m in scored_matches]
+    
+    # Try case-insensitive filename match with parent directory scoring
+    filename_case_insensitive_matches = [
+        f for f in all_files 
+        if os.path.basename(f).lower() == target_filename.lower()
+    ]
+    if filename_case_insensitive_matches:
+        # Score matches based on parent directory similarity
+        scored_matches = []
+        for match in filename_case_insensitive_matches:
+            match_parent = os.path.dirname(match)
+            score = 0
+            
+            # Check if parent directories share any common parts
+            if target_parent:
+                target_parts = target_parent.lower().split(os.sep)
+                match_parts = match_parent.lower().split(os.sep)
+                
+                # Count matching parts in sequence
+                for i in range(min(len(target_parts), len(match_parts))):
+                    if target_parts[i] == match_parts[i]:
+                        score += 1
+                    else:
+                        break
+                
+                # Check if one is a substring of the other
+                if target_parent.lower() in match_parent.lower() or match_parent.lower() in target_parent.lower():
+                    score += 2
+            
+            scored_matches.append((match, score))
+        
+        # Sort by score and return the best match
+        scored_matches.sort(key=lambda x: x[1], reverse=True)
+        return scored_matches[0][0], [m[0] for m in scored_matches]
+    
+    # Try partial path matching with parent directory context
+    target_parts = target_path.split(os.sep)
+    partial_matches = []
+    
+    for file_path in all_files:
+        file_parts = file_path.split(os.sep)
+        # Check if target parts appear in sequence in the file path
+        if all(part in file_parts for part in target_parts):
+            # Score based on parent directory similarity
+            score = 0
+            if target_parent:
+                match_parent = os.path.dirname(file_path)
+                if target_parent in match_parent or match_parent in target_parent:
+                    score += 2
+            
+            partial_matches.append((file_path, score))
+    
+    if partial_matches:
+        # Sort by score and return the best match
+        partial_matches.sort(key=lambda x: x[1], reverse=True)
+        return partial_matches[0][0], [m[0] for m in partial_matches]
+    
+    # Try fuzzy matching on the filename with parent directory context
+    from difflib import SequenceMatcher
+    fuzzy_matches = []
+    for file_path in all_files:
+        filename = os.path.basename(file_path)
+        similarity = SequenceMatcher(None, target_filename.lower(), filename.lower()).ratio()
+        if similarity > 0.7:  # Lowered threshold to 70% for better matching
+            # Score based on parent directory similarity
+            score = similarity
+            if target_parent:
+                match_parent = os.path.dirname(file_path)
+                if target_parent in match_parent or match_parent in target_parent:
+                    score += 0.3  # Increased boost for matching parent directory
+                
+                # Additional boost for matching parent directory parts
+                target_parts = target_parent.lower().split(os.sep)
+                match_parts = match_parent.lower().split(os.sep)
+                for i in range(min(len(target_parts), len(match_parts))):
+                    if target_parts[i] == match_parts[i]:
+                        score += 0.1
+            
+            fuzzy_matches.append((file_path, score))
+    
+    if fuzzy_matches:
+        # Sort by score and return the best match
+        fuzzy_matches.sort(key=lambda x: x[1], reverse=True)
+        return fuzzy_matches[0][0], [m[0] for m in fuzzy_matches]
+    
+    # If no matches found, try one last time with a more lenient approach
+    # Look for files in the same parent directory with similar names
+    if target_parent:
+        parent_dir_matches = []
+        for file_path in all_files:
+            match_parent = os.path.dirname(file_path)
+            if target_parent in match_parent or match_parent in target_parent:
+                filename = os.path.basename(file_path)
+                # Check if the filenames share any common words
+                target_words = set(target_filename.lower().split('_'))
+                file_words = set(filename.lower().split('_'))
+                if target_words & file_words:  # If there's any overlap in words
+                    similarity = SequenceMatcher(None, target_filename.lower(), filename.lower()).ratio()
+                    if similarity > 0.6:  # Even more lenient threshold
+                        parent_dir_matches.append((file_path, similarity))
+        
+        if parent_dir_matches:
+            parent_dir_matches.sort(key=lambda x: x[1], reverse=True)
+            return parent_dir_matches[0][0], [m[0] for m in parent_dir_matches]
+    
+    return None, []
+
 def preview_changes(changes: List[FileChange], repo_path: str) -> List[Dict[str, Any]]:
     """Generate a preview of the changes to be applied.
     
     Args:
         changes: A list of FileChange objects
-        repo_path: The absolute path to the repository root
+        repo_path: The path to the target repository
         
     Returns:
         A list of dictionaries with preview information
@@ -918,102 +1229,106 @@ def preview_changes(changes: List[FileChange], repo_path: str) -> List[Dict[str,
             "summary": change.summary
         }
         
-        # Handle both absolute and relative paths
-        if os.path.isabs(change.path):
-            full_path = change.path
-        else:
-            full_path = os.path.join(repo_path, change.path)
+        # Find the actual file path in the repository
+        actual_path, possible_matches = find_file_in_repo(change.path, repo_path)
+        
+        if actual_path:
+            preview["path"] = actual_path
+            full_path = os.path.join(repo_path, actual_path)
+            file_exists = os.path.exists(full_path)
+            preview["exists"] = file_exists
             
-        file_exists = os.path.exists(full_path)
-        preview["exists"] = file_exists
-        
-        if change.operation == "CREATE":
-            preview["status"] = "Will create new file"
-            if file_exists:
-                preview["warning"] = "File already exists and will be overwritten"
-                preview["has_diff"] = True
-                # We could add a diff here between existing and new content
-        
-        elif change.operation == "UPDATE":
-            if file_exists:
-                preview["status"] = "Will update existing file"
-                # We could add a diff here between existing and new content
-                preview["has_diff"] = True
-            else:
-                preview["status"] = "Will create new file (marked as UPDATE)"
-                preview["warning"] = "File doesn't exist but will be created"
-        
-        elif change.operation == "MODIFY":
-            if not file_exists:
-                preview["status"] = "Cannot modify (file doesn't exist)"
-                preview["warning"] = "File doesn't exist"
-                continue
+            if change.operation == "CREATE":
+                preview["status"] = "Will create new file"
+                if file_exists:
+                    preview["warning"] = "File already exists and will be overwritten"
+                    preview["has_diff"] = True
             
-            # Check if search pattern exists in the file
-            try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    current_content = f.read()
-                
-                # Try to find the best match for the search pattern
-                matched_text, match_ratio = find_closest_match(change.search, current_content)
-                
-                if matched_text and match_ratio >= 0.98:
-                    # Almost exact match
-                    preview["status"] = "Will perform partial modification"
+            elif change.operation == "UPDATE":
+                if file_exists:
+                    preview["status"] = "Will update existing file"
                     preview["has_diff"] = True
-                    
-                    occurrences = current_content.count(matched_text)
-                    if occurrences > 1:
-                        preview["warning"] = f"Search pattern found {occurrences} times - all will be replaced"
-                
-                elif matched_text and match_ratio >= 0.8:
-                    # Good match but not exact
-                    preview["status"] = "Will perform partial modification (using close match)"
-                    preview["has_diff"] = True
-                    
-                    occurrences = current_content.count(matched_text)
-                    if occurrences > 1:
-                        preview["warning"] = f"Similar pattern found {occurrences} times - will try contextual replacement"
-                    else:
-                        preview["warning"] = f"Using close pattern match (similarity: {match_ratio:.2f}) - verify results"
-                
-                elif matched_text and match_ratio >= 0.7:
-                    # Moderate match
-                    preview["status"] = "Will attempt partial modification (moderate match)"
-                    preview["has_diff"] = True
-                    preview["warning"] = f"Using moderate pattern match (similarity: {match_ratio:.2f}) - verify results carefully"
-                
                 else:
-                    # Try with normalized whitespace
-                    normalized_search = normalize_whitespace(change.search)
-                    normalized_content = normalize_whitespace(current_content)
-                    
-                    if normalized_search in normalized_content:
-                        preview["status"] = "Will attempt modification (whitespace differences)"
-                        preview["has_diff"] = True
-                        preview["warning"] = "Search pattern found with whitespace differences - will try smart replacement"
-                    else:
-                        # Structure-preserving normalization
-                        normalized_search = normalize_whitespace(change.search, preserve_structure=True)
-                        normalized_content = normalize_whitespace(current_content, preserve_structure=True)
+                    preview["status"] = "Will create new file (marked as UPDATE)"
+                    preview["warning"] = "File doesn't exist but will be created"
+            
+            elif change.operation == "MODIFY":
+                if not file_exists:
+                    preview["status"] = "Cannot modify (file doesn't exist)"
+                    preview["warning"] = "File doesn't exist"
+                else:
+                    # Check if search pattern exists in the file
+                    try:
+                        with open(full_path, "r", encoding="utf-8") as f:
+                            current_content = f.read()
                         
-                        if normalized_search in normalized_content:
-                            preview["status"] = "Will attempt modification (formatting differences)"
+                        # Try to find the best match for the search pattern
+                        matched_text, match_ratio = find_closest_match(change.search, current_content)
+                        
+                        if matched_text and match_ratio >= 0.98:
+                            # Almost exact match
+                            preview["status"] = "Will perform partial modification"
                             preview["has_diff"] = True
-                            preview["warning"] = "Search pattern found with formatting differences - will try smart replacement"
+                            
+                            occurrences = current_content.count(matched_text)
+                            if occurrences > 1:
+                                preview["warning"] = f"Search pattern found {occurrences} times - all will be replaced"
+                        
+                        elif matched_text and match_ratio >= 0.8:
+                            # Good match but not exact
+                            preview["status"] = "Will perform partial modification (using close match)"
+                            preview["has_diff"] = True
+                            
+                            occurrences = current_content.count(matched_text)
+                            if occurrences > 1:
+                                preview["warning"] = f"Similar pattern found {occurrences} times - will try contextual replacement"
+                            else:
+                                preview["warning"] = f"Using close pattern match (similarity: {match_ratio:.2f}) - verify results"
+                        
+                        elif matched_text and match_ratio >= 0.7:
+                            # Moderate match
+                            preview["status"] = "Will attempt partial modification (moderate match)"
+                            preview["has_diff"] = True
+                            preview["warning"] = f"Using moderate pattern match (similarity: {match_ratio:.2f}) - verify results carefully"
+                        
                         else:
-                            preview["status"] = "Cannot modify (search pattern not found)"
-                            preview["warning"] = "Search pattern not found in file"
-            except Exception as e:
-                preview["status"] = f"Error reading file: {str(e)}"
-                preview["warning"] = "Cannot preview changes due to error"
-        
-        elif change.operation == "DELETE":
-            if file_exists:
-                preview["status"] = "Will delete file"
+                            # Try with normalized whitespace
+                            normalized_search = normalize_whitespace(change.search)
+                            normalized_content = normalize_whitespace(current_content)
+                            
+                            if normalized_search in normalized_content:
+                                preview["status"] = "Will attempt modification (whitespace differences)"
+                                preview["has_diff"] = True
+                                preview["warning"] = "Search pattern found with whitespace differences - will try smart replacement"
+                            else:
+                                # Structure-preserving normalization
+                                normalized_search = normalize_whitespace(change.search, preserve_structure=True)
+                                normalized_content = normalize_whitespace(current_content, preserve_structure=True)
+                                
+                                if normalized_search in normalized_content:
+                                    preview["status"] = "Will attempt modification (formatting differences)"
+                                    preview["has_diff"] = True
+                                    preview["warning"] = "Search pattern found with formatting differences - will try smart replacement"
+                                else:
+                                    preview["status"] = "Cannot modify (search pattern not found)"
+                                    preview["warning"] = "Search pattern not found in file"
+                    except Exception as e:
+                        preview["status"] = f"Error reading file: {str(e)}"
+                        preview["warning"] = "Cannot preview changes due to error"
+            
+            elif change.operation == "DELETE":
+                if file_exists:
+                    preview["status"] = "Will delete file"
+                else:
+                    preview["status"] = "Cannot delete (file doesn't exist)"
+                    preview["warning"] = "File doesn't exist"
+        else:
+            if possible_matches:
+                preview["status"] = "Multiple possible matches found"
+                preview["warning"] = f"Found {len(possible_matches)} possible matches: {', '.join(possible_matches)}"
             else:
-                preview["status"] = "Cannot delete (file doesn't exist)"
-                preview["warning"] = "File doesn't exist"
+                preview["status"] = "File not found in repository"
+                preview["warning"] = "Could not find file in repository"
         
         previews.append(preview)
     

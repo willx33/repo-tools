@@ -117,77 +117,138 @@ def get_repo_files():
 def copy_repo_content():
     """Copy repository content to clipboard."""
     data = request.json
-    repos = data.get('repos', [])
-    # Support for both old format and new selected files format
+    
+    # Handle direct text content
+    if 'text' in data:
+        formatted_content = data['text']
+        copy_to_clipboard(formatted_content)
+        return jsonify({
+            "success": True, 
+            "message": "Content copied to clipboard"
+        })
+    
+    # Handle repository content
     selected_repos = data.get('selectedRepos', [])
     
-    # If we received the new selected files format, use that
     if selected_repos:
         # Format content for clipboard
         formatted_content = ""
         
+        # Add file tree structure
+        formatted_content += "FILE TREE STRUCTURE:\n"
+        formatted_content += "=" * 80 + "\n\n"
+        
+        total_files = 0
+        
         for repo in selected_repos:
-            repo_name = repo.get('name')
-            repo_path = repo.get('path', '')
-            files = repo.get('files', [])
+            # Get the tree data which includes selection state
+            tree_data = repo.get('treeData', {})
+            if not tree_data:
+                continue
+                
+            # Count selected files
+            selected_files = sum(1 for f in repo['files'] if f.get('selected', True))
+            total_files += selected_files
             
-            # Add a repository header with separator
-            formatted_content += f"\n{'=' * 80}\n"
-            formatted_content += f"REPOSITORY: {repo_name}\n"
-            formatted_content += f"{'=' * 80}\n\n"
+            # Add repository name as root with total file count
+            formatted_content += f"{repo['name']}\n"
+            formatted_content += f"{selected_files} files\n\n"
             
-            # Add all selected files from this repo
-            for file in files:
-                file_path = file.get('path')
-                content = file.get('content')
-                formatted_content += f"{file_path}:\n{content}\n\n"
+            # Build tree structure recursively
+            def build_tree(node, prefix='', is_last=False):
+                nonlocal formatted_content
+                
+                if not node:
+                    return
+                
+                # Skip if this node is completely deselected (not selected and not indeterminate)
+                if not node.get('selected', True) and not node.get('indeterminate', False):
+                    return
+                
+                # For directories
+                if node.get('type') == 'directory':
+                    # Add directory entry (without file count)
+                    formatted_content += f"{prefix}{'└── ' if is_last else '├── '}{node['name']}\n"
+                    
+                    # Process children
+                    if node.get('children'):
+                        children = sorted(
+                            node['children'].values(),
+                            key=lambda x: (x.get('type') != 'directory', x.get('name', ''))
+                        )
+                        
+                        for i, child in enumerate(children):
+                            is_last_child = i == len(children) - 1
+                            build_tree(
+                                child,
+                                prefix + ('    ' if is_last else '│   '),
+                                is_last_child
+                            )
+                
+                # For files
+                elif node.get('type') == 'file' and node.get('selected', True):
+                    formatted_content += f"{prefix}{'└── ' if is_last else '├── '}{node['name']}\n"
+            
+            # Start building tree from root's children
+            if tree_data.get('children'):
+                children = sorted(
+                    tree_data['children'].values(),
+                    key=lambda x: (x.get('type') != 'directory', x.get('name', ''))
+                )
+                
+                for i, child in enumerate(children):
+                    build_tree(child, '', i == len(children) - 1)
+            
+            formatted_content += "\n"
+        
+        formatted_content += "=" * 80 + "\n\n"
+        
+        # Add file contents
+        for repo in selected_repos:
+            formatted_content += f"REPOSITORY: {repo['name']}\n"
+            formatted_content += "=" * 80 + "\n\n"
+            
+            for file in repo['files']:
+                if file.get('selected', True):  # Only include selected files
+                    formatted_content += f"{file['path']}:\n{file.get('content', '')}\n\n"
         
         # Copy to clipboard
         copy_to_clipboard(formatted_content)
-        
-        # Show toast notification
-        repo_names = ', '.join([repo.get('name') for repo in selected_repos])
-        show_toast(f"Repository files copied to clipboard: {repo_names}")
         
         return jsonify({
             "success": True, 
-            "message": f"Copied {sum(len(repo.get('files', [])) for repo in selected_repos)} files from {len(selected_repos)} repositories to clipboard"
+            "message": f"Copied {total_files} files from {len(selected_repos)} repositories to clipboard"
         })
     
-    # Legacy format handling
-    elif repos:
-        # Format content for clipboard
-        formatted_content = ""
-        
-        for repo in repos:
-            repo_name = repo.get('name')
-            repo_url = repo.get('url', '')  # GitHub repos have URLs, local repos don't
-            included_files = repo.get('included', [])
-            
-            # Add a repository header with separator
-            formatted_content += f"\n{'=' * 80}\n"
-            if repo_url:
-                formatted_content += f"REPOSITORY: {repo_name} ({repo_url})\n"
-            else:
-                formatted_content += f"REPOSITORY: {repo_name}\n"
-            formatted_content += f"{'=' * 80}\n\n"
-            
-            # Add all files from this repo
-            for file in included_files:
-                file_path = file.get('path')
-                content = file.get('content')
-                formatted_content += f"{file_path}:\n{content}\n\n"
-        
-        # Copy to clipboard
-        copy_to_clipboard(formatted_content)
-        
-        # Show toast notification
-        repo_names = ', '.join([repo.get('name') for repo in repos])
-        show_toast(f"Repositories copied to clipboard: {repo_names}")
-        
-        return jsonify({"success": True, "message": f"Copied {len(repos)} repositories to clipboard"})
-    
-    return jsonify({"error": "No repositories provided"}), 400
+    return jsonify({"error": "No content provided"}), 400
+
+def format_token_count(count):
+    """Format token count with K/M suffix."""
+    if count < 1000:
+        return str(count)
+    elif count < 1000000:
+        return f"{count/1000:.1f}k"
+    else:
+        return f"{count/1000000:.1f}M"
+
+def get_file_icon(extension):
+    """Get appropriate icon for file type."""
+    icon_map = {
+        'py': '🐍',
+        'md': '📝',
+        'txt': '📝',
+        'json': '⚙️',
+        'yml': '⚙️',
+        'yaml': '⚙️',
+        'toml': '⚙️',
+        'html': '📄',
+        'css': '📄',
+        'js': '📄',
+        'jsx': '📄',
+        'ts': '📄',
+        'tsx': '📄',
+    }
+    return icon_map.get(extension.lower(), '📄')
 
 @app.route('/api/copy-file-to-clipboard', methods=['POST'])
 def copy_file_content():

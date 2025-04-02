@@ -197,10 +197,71 @@
     </div>
 </div>
 
+<!-- Create Prompt Section -->
+<div class="workflow-step hidden" id="step-create-prompt">
+    <h3>✍️ Create Prompt</h3>
+    
+    <div class="form-group">
+        <label for="prompt-input">Enter your prompt:</label>
+        <textarea 
+            id="prompt-input" 
+            class="prompt-input" 
+            placeholder="Enter your prompt here..."
+            rows="10"
+        ></textarea>
+    </div>
+    
+    <div class="copy-settings">
+        <h4>Copy Settings</h4>
+        <div class="settings-group">
+            <label class="setting-item">
+                <input type="checkbox" id="include-repo-context" checked>
+                <span>Include repository context</span>
+            </label>
+            <label class="setting-item">
+                <input type="checkbox" id="include-prompt" checked>
+                <span>Include prompt text</span>
+            </label>
+        </div>
+    </div>
+    
+    <div class="action-buttons">
+        <button id="prompt-copy-button" class="btn btn-primary">📋 Copy to Clipboard</button>
+    </div>
+</div>
+
 <div id="notification" class="notification hidden">
     <div class="notification-content">
         <span id="notification-message"></span>
         <span class="notification-close">&times;</span>
+    </div>
+</div>
+
+<div class="workflow-step hidden" id="step-prompt">
+    <h3>📝 Step 4: Create Prompt</h3>
+    
+    <div class="prompt-settings">
+        <div class="settings-group">
+            <h4>Copy Settings</h4>
+            <div class="setting-item">
+                <label>
+                    <input type="checkbox" id="include-repo-context" checked>
+                    Include repository context
+                </label>
+            </div>
+            <div class="setting-item">
+                <label>
+                    <input type="checkbox" id="include-file-tree" checked>
+                    Include file tree structure
+                </label>
+            </div>
+            <div class="setting-item">
+                <label>
+                    <input type="checkbox" id="include-prompt" checked>
+                    Include prompt text
+                </label>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -237,6 +298,7 @@
         const repoSortSelect = document.getElementById('repo-sort-select');
         
         const stepFileSummary = document.getElementById('step-file-summary');
+        const stepCreatePrompt = document.getElementById('step-create-prompt');
         const includedCount = document.getElementById('included-count');
         const fileTree = document.getElementById('file-tree');
         const ignoredCount = document.getElementById('ignored-count');
@@ -253,6 +315,12 @@
         const selectedReposSummary = document.getElementById('selected-repos-summary');
         const selectedReposCount = document.getElementById('selected-repos-count');
         const selectedReposList = document.getElementById('selected-repos-list');
+        
+        // Create Prompt section elements
+        const promptInput = document.getElementById('prompt-input');
+        const includeRepoContext = document.getElementById('include-repo-context');
+        const includePrompt = document.getElementById('include-prompt');
+        const promptCopyButton = document.getElementById('prompt-copy-button');
         
         // File tree search
         const treeSearchInput = document.getElementById('tree-search-input');
@@ -526,8 +594,9 @@
                                 renderFileTree();
                                 // Ignored file tree will be rendered when expanded
                                 
-                                // Show the file summary step
+                                // Show both the file summary step and create prompt step
                                 stepFileSummary.classList.remove('hidden');
+                                stepCreatePrompt.classList.remove('hidden');
                                 
                                 // Save initial selection state to localStorage
                                 saveSelectionState();
@@ -546,6 +615,7 @@
                                     updateFileSummary();
                                     renderFileTree();
                                     stepFileSummary.classList.remove('hidden');
+                                    stepCreatePrompt.classList.remove('hidden');
                                 } else {
                                     // Re-enable Step 2 if no repos were loaded
                                     stepRepoSelect.classList.remove('disabled');
@@ -2637,7 +2707,10 @@
                 if (node.selected) {
                     files.push({
                         path: node.path,
-                        content: node.content || ""
+                        content: node.content || "",
+                        name: node.name,
+                        type: 'file',
+                        tokenCount: node.tokenCount
                     });
                 }
                 return files;
@@ -2652,7 +2725,15 @@
                 
                 // Process each child recursively
                 Object.values(node.children).forEach(child => {
-                    files.push(...getSelectedFiles(child));
+                    if (child.type === 'directory') {
+                        // For directories, include their path and recursively get their contents
+                        const dirFiles = getSelectedFiles(child);
+                        if (dirFiles.length > 0) {
+                            files.push(...dirFiles);
+                        }
+                    } else {
+                        files.push(...getSelectedFiles(child));
+                    }
                 });
             }
             
@@ -2694,80 +2775,184 @@
             });
         }
         // Copy to clipboard
-        function copyToClipboard() {
-            if (selectedRepos.length === 0) return;
-            
-            // Collect all selected files from both trees
-            const selectedFilesData = [];
-            
-            // Get selected files from included files tree
-            if (fileTreeData && fileTreeData.length > 0) {
-                fileTreeData.forEach(repo => {
-                    const repoFiles = getSelectedFiles(repo);
-                    
-                    if (repoFiles.length > 0) {
-                        // Find if this repo is already in selectedFilesData
-                        let repoEntry = selectedFilesData.find(r => r.name === repo.name);
-                        
-                        if (!repoEntry) {
-                            repoEntry = {
+        async function copyToClipboard() {
+            try {
+                // Format the data for the API using our existing tree structure
+                const selectedFilesData = [];
+                
+                // Get selected files from included files tree
+                if (fileTreeData && fileTreeData.length > 0) {
+                    fileTreeData.forEach(repo => {
+                        const repoFiles = getSelectedFiles(repo);
+                        if (repoFiles.length > 0) {
+                            selectedFilesData.push({
                                 name: repo.name,
-                                path: selectedRepos.find(r => r.name === repo.name)?.path || '',
-                                files: []
-                            };
-                            selectedFilesData.push(repoEntry);
+                                files: repoFiles,
+                                treeData: repo  // Include the full tree data structure
+                            });
                         }
-                        
-                        // Add files to this repo entry
-                        repoEntry.files = repoEntry.files.concat(repoFiles);
-                    }
-                });
-            }
-            
-            // Get selected files from ignored files tree
-            if (ignoredTreeData && ignoredTreeData.length > 0) {
-                ignoredTreeData.forEach(repo => {
-                    const ignoredRepoFiles = getSelectedFiles(repo);
-                    
-                    if (ignoredRepoFiles.length > 0) {
-                        // Find if this repo is already in selectedFilesData
-                        let repoEntry = selectedFilesData.find(r => r.name === repo.name);
-                        
-                        if (!repoEntry) {
-                            repoEntry = {
-                                name: repo.name,
-                                path: selectedRepos.find(r => r.name === repo.name)?.path || '',
-                                files: []
-                            };
-                            selectedFilesData.push(repoEntry);
-                        }
-                        
-                        // Add ignored files to this repo entry
-                        repoEntry.files = repoEntry.files.concat(ignoredRepoFiles);
-                    }
-                });
-            }
-            
-            // Send only selected files to be copied
-            axios.post('/api/copy-to-clipboard', { selectedRepos: selectedFilesData })
-                .then(response => {
-                    // Calculate total selected files
-                    let totalFiles = 0;
-                    selectedFilesData.forEach(repo => {
-                        totalFiles += repo.files.length;
                     });
-                    
-                    showNotification(`📋 ${totalFiles} files from ${selectedFilesData.length} repositories copied to clipboard!`, 'success');
-                })
-                .catch(error => {
-                    showNotification('Error copying to clipboard: ' + error.message, 'error');
+                }
+                
+                // Get selected files from ignored files tree
+                if (ignoredTreeData && ignoredTreeData.length > 0) {
+                    ignoredTreeData.forEach(repo => {
+                        const ignoredRepoFiles = getSelectedFiles(repo);
+                        if (ignoredRepoFiles.length > 0) {
+                            // Find if we already have this repo
+                            let repoEntry = selectedFilesData.find(r => r.name === repo.name);
+                            if (!repoEntry) {
+                                repoEntry = {
+                                    name: repo.name,
+                                    files: [],
+                                    treeData: repo  // Include the full tree data structure
+                                };
+                                selectedFilesData.push(repoEntry);
+                            }
+                            repoEntry.files = repoEntry.files.concat(ignoredRepoFiles);
+                        }
+                    });
+                }
+
+                if (selectedFilesData.length === 0) {
+                    showNotification('No files selected to copy', 'warning');
+                    return;
+                }
+                
+                // Make API call to copy to clipboard
+                const response = await fetch('/api/copy-to-clipboard', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ selectedRepos: selectedFilesData })
                 });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                showNotification(result.message, 'success');
+            } catch (error) {
+                console.error('Error copying to clipboard:', error);
+                showNotification('Error copying to clipboard: ' + error.message, 'error');
+            }
+        }
+        
+        // Copy prompt with settings
+        function copyPromptWithSettings() {
+            let content = '';
+            
+            // Include repository context if enabled
+            if (includeRepoContext.checked) {
+                // Collect all selected files from both trees
+                const selectedFilesData = [];
+                
+                // Get selected files from included files tree
+                if (fileTreeData && fileTreeData.length > 0) {
+                    fileTreeData.forEach(repo => {
+                        const repoFiles = getSelectedFiles(repo);
+                        if (repoFiles.length > 0) {
+                            let repoEntry = selectedFilesData.find(r => r.name === repo.name);
+                            if (!repoEntry) {
+                                repoEntry = {
+                                    name: repo.name,
+                                    files: []
+                                };
+                                selectedFilesData.push(repoEntry);
+                            }
+                            repoEntry.files = repoEntry.files.concat(repoFiles);
+                        }
+                    });
+                }
+                
+                // Get selected files from ignored files tree
+                if (ignoredTreeData && ignoredTreeData.length > 0) {
+                    ignoredTreeData.forEach(repo => {
+                        const ignoredRepoFiles = getSelectedFiles(repo);
+                        if (ignoredRepoFiles.length > 0) {
+                            let repoEntry = selectedFilesData.find(r => r.name === repo.name);
+                            if (!repoEntry) {
+                                repoEntry = {
+                                    name: repo.name,
+                                    path: selectedRepos.find(r => r.name === repo.name)?.path || '',
+                                    files: []
+                                };
+                                selectedFilesData.push(repoEntry);
+                            }
+                            repoEntry.files = repoEntry.files.concat(ignoredRepoFiles);
+                        }
+                    });
+                }
+                
+                // Include file tree if enabled
+                if (includeFileTree.checked) {
+                    const fileTree = generateFileTree(selectedFilesData);
+                    content += 'FILE TREE STRUCTURE:\n';
+                    content += '='.repeat(80) + '\n\n';
+                    content += fileTree;
+                    content += '='.repeat(80) + '\n\n';
+                }
+                
+                // Format repository content
+                selectedFilesData.forEach(repo => {
+                    content += `\n${'=' * 80}\n`;
+                    content += `REPOSITORY: ${repo.name}\n`;
+                    content += `${'=' * 80}\n\n`;
+                    
+                    repo.files.forEach(file => {
+                        content += `${file.path}:\n${file.content || ''}\n\n`;
+                    });
+                });
+            }
+            
+            // Include prompt text if enabled
+            if (includePrompt.checked && promptInput.value.trim()) {
+                if (content) {
+                    // Add a clear separator and label for the prompt text
+                    content += `\n${'=' * 80}\n`;
+                    content += `USER PROMPT:\n`;
+                    content += `${'=' * 80}\n\n`;
+                }
+                content += promptInput.value.trim();
+            }
+            
+            // Copy to clipboard
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(content)
+                    .then(() => {
+                        showNotification('📋 Content copied to clipboard!', 'success');
+                    })
+                    .catch(err => {
+                        // Fall back to server-side API if browser API fails
+                        axios.post('/api/copy-to-clipboard', { text: content })
+                            .then(response => {
+                                showNotification('📋 Content copied to clipboard!', 'success');
+                            })
+                            .catch(error => {
+                                showNotification('Error copying to clipboard: ' + error.message, 'error');
+                            });
+                    });
+            } else {
+                // Fall back to server-side API if browser API is not available
+                axios.post('/api/copy-to-clipboard', { text: content })
+                    .then(response => {
+                        showNotification('📋 Content copied to clipboard!', 'success');
+                    })
+                    .catch(error => {
+                        showNotification('Error copying to clipboard: ' + error.message, 'error');
+                    });
+            }
         }
         
         // Return to repository selection
         function backToRepoSelect() {
             // Hide step 3
             stepFileSummary.classList.add('hidden');
+            
+            // Hide create prompt section
+            stepCreatePrompt.classList.add('hidden');
             
             // Re-enable step 2
             stepRepoSelect.classList.remove('disabled');
@@ -3288,6 +3473,76 @@
         ignoredTreeSortSelect.addEventListener('change', () => {
             renderIgnoredFileTree();
         });
+
+        // Event listeners
+        copyButton.addEventListener('click', copyToClipboard);
+        promptCopyButton.addEventListener('click', copyPromptWithSettings);
+
+        // Function to generate tree diagram of selected files
+        function generateFileTree(selectedFilesData) {
+            let tree = '';
+            
+            selectedFilesData.forEach(repo => {
+                // Use the existing tree data structure
+                const treeData = repo.treeData;
+                if (!treeData) return;
+                
+                // Add repository name as root with stats
+                tree += `📦 ${repo.name}\n`;
+                tree += `${repo.fileCount} files · ~${formatTokenCount(repo.tokenCount)} tokens\n\n`;
+                
+                // Function to recursively build the tree
+                function buildTree(node, prefix = '') {
+                    if (!node) return;
+                    
+                    // Sort children: directories first, then files
+                    const children = Object.values(node.children || {}).sort((a, b) => {
+                        if (a.type !== b.type) {
+                            return a.type === 'directory' ? -1 : 1;
+                        }
+                        return a.name.localeCompare(b.name);
+                    });
+                    
+                    children.forEach((child, index) => {
+                        const isLast = index === children.length - 1;
+                        const linePrefix = prefix + (isLast ? '└── ' : '├── ');
+                        const nextPrefix = prefix + (isLast ? '    ' : '│   ');
+                        
+                        if (child.type === 'directory') {
+                            // Only show directories that have selected files
+                            if (child.selected || child.indeterminate) {
+                                tree += `${linePrefix}📂 ${child.name}\n`;
+                                if (child.fileCount > 0) {
+                                    tree += `${nextPrefix}${child.fileCount} files · ~${formatTokenCount(child.tokenCount)} tokens\n`;
+                                }
+                                buildTree(child, nextPrefix);
+                            }
+                        } else if (child.type === 'file' && child.selected) {
+                            // Show selected files with appropriate icons
+                            const ext = child.name.split('.').pop().toLowerCase();
+                            let icon = '📄';
+                            if (ext === 'py') icon = '🐍';
+                            else if (ext === 'md') icon = '📝';
+                            else if (['json', 'toml', 'yaml', 'yml'].includes(ext)) icon = '⚙️';
+                            else if (['html', 'css', 'js'].includes(ext)) icon = '📄';
+                            
+                            tree += `${linePrefix}${icon} ${child.name}`;
+                            if (child.tokenCount) {
+                                tree += ` ~${child.tokenCount}\n`;
+                            } else {
+                                tree += '\n';
+                            }
+                        }
+                    });
+                }
+                
+                // Start building tree from root
+                buildTree(treeData);
+                tree += '\n';
+            });
+            
+            return tree;
+        }
     });
 </script>
 
@@ -3727,6 +3982,71 @@
         background-color: rgba(60, 60, 60, 0.6);
         padding: 2px 8px;
         border-radius: 4px;
+    }
+
+    /* Create Prompt section styles */
+    .prompt-input {
+        width: 100%;
+        min-height: 200px;
+        padding: 1rem;
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-family: monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        resize: vertical;
+        margin-bottom: 1rem;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+    
+    .prompt-input:focus {
+        outline: none;
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 2px var(--accent-color-transparent);
+    }
+    
+    .copy-settings {
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+    
+    .copy-settings h4 {
+        margin: 0 0 0.75rem 0;
+        color: var(--text-primary);
+        font-size: 1rem;
+    }
+    
+    .settings-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .setting-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 0.9rem;
+    }
+    
+    .setting-item input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+    }
+    
+    .setting-item span {
+        user-select: none;
     }
 </style>
 {% endblock %}

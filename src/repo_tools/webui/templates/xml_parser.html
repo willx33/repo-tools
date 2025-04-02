@@ -602,6 +602,21 @@
     step2.classList.remove('hidden');
     step1.classList.add('hidden');
     step3.classList.add('hidden');
+    
+    // Clear selected repository state
+    selectedRepository = null;
+    
+    // Clear any active radio buttons
+    const radioButtons = document.querySelectorAll('input[name="repository"]');
+    radioButtons.forEach(radio => {
+        radio.checked = false;
+    });
+    
+    // Clear XML input and results
+    xmlInput.value = '';
+    previewContainer.classList.add('hidden');
+    resultsContainer.classList.add('hidden');
+    applyBtn.disabled = true;
   }
   
   function showNotification(message, type = 'info') {
