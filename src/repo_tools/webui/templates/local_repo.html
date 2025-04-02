@@ -199,7 +199,40 @@
 
 <!-- Create Prompt Section -->
 <div class="workflow-step hidden" id="step-create-prompt">
-    <h3>✍️ Create Prompt</h3>
+    <h3>✍️ Step 4: Create Prompt</h3>
+    
+    <!-- Copy Settings Panel -->
+    <div class="summary-box">
+        <div class="summary-header" id="copy-settings-header">
+            <h4>Copy Settings</h4>
+            <button class="expand-collapse-btn">Collapse ▲</button>
+        </div>
+        <div class="copy-settings-content">
+            <div class="settings-group">
+                <div class="setting-item">
+                    <input type="checkbox" id="include-repo-context" class="tree-checkbox" checked>
+                    <div class="setting-info">
+                        <div class="setting-label">Repository Context</div>
+                        <div class="setting-description">Include selected files and their contents</div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <input type="checkbox" id="include-file-tree" class="tree-checkbox" checked>
+                    <div class="setting-info">
+                        <div class="setting-label">File Tree</div>
+                        <div class="setting-description">Include hierarchical file structure</div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <input type="checkbox" id="include-prompt" class="tree-checkbox" checked>
+                    <div class="setting-info">
+                        <div class="setting-label">Prompt Text</div>
+                        <div class="setting-description">Include your custom prompt text</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     
     <div class="form-group">
         <label for="prompt-input">Enter your prompt:</label>
@@ -209,20 +242,6 @@
             placeholder="Enter your prompt here..."
             rows="10"
         ></textarea>
-    </div>
-    
-    <div class="copy-settings">
-        <h4>Copy Settings</h4>
-        <div class="settings-group">
-            <label class="setting-item">
-                <input type="checkbox" id="include-repo-context" checked>
-                <span>Include repository context</span>
-            </label>
-            <label class="setting-item">
-                <input type="checkbox" id="include-prompt" checked>
-                <span>Include prompt text</span>
-            </label>
-        </div>
     </div>
     
     <div class="action-buttons">
@@ -2842,14 +2861,27 @@
         
         // Copy prompt with settings
         function copyPromptWithSettings() {
-            let content = '';
-            
-            // Include repository context if enabled
-            if (includeRepoContext.checked) {
-                // Collect all selected files from both trees
+            try {
+                // Get correct references to the checkbox elements
+                const includeRepoContextCheckbox = document.querySelector('#step-create-prompt #include-repo-context');
+                const includeFileTreeCheckbox = document.querySelector('#step-create-prompt #include-file-tree');
+                const includePromptCheckbox = document.querySelector('#step-create-prompt #include-prompt');
+                const promptInputElement = document.querySelector('#step-create-prompt #prompt-input');
+                
+                console.log("Copy prompt function called", {
+                    includeRepoContext: includeRepoContextCheckbox?.checked,
+                    includeFileTree: includeFileTreeCheckbox?.checked,
+                    includePrompt: includePromptCheckbox?.checked
+                });
+                
+                if (!includeRepoContextCheckbox || !includeFileTreeCheckbox || !includePromptCheckbox || !promptInputElement) {
+                    throw new Error("Required elements not found");
+                }
+
+                let content = '';
                 const selectedFilesData = [];
                 
-                // Get selected files from included files tree
+                // Collect selected files data first
                 if (fileTreeData && fileTreeData.length > 0) {
                     fileTreeData.forEach(repo => {
                         const repoFiles = getSelectedFiles(repo);
@@ -2858,7 +2890,11 @@
                             if (!repoEntry) {
                                 repoEntry = {
                                     name: repo.name,
-                                    files: []
+                                    path: selectedRepos.find(r => r.name === repo.name)?.path || '',
+                                    files: [],
+                                    treeData: repo,
+                                    fileCount: repoFiles.length,
+                                    tokenCount: repo.tokenCount
                                 };
                                 selectedFilesData.push(repoEntry);
                             }
@@ -2874,10 +2910,14 @@
                         if (ignoredRepoFiles.length > 0) {
                             let repoEntry = selectedFilesData.find(r => r.name === repo.name);
                             if (!repoEntry) {
+                                const originalRepo = selectedRepos.find(r => r.name === repo.name);
                                 repoEntry = {
                                     name: repo.name,
-                                    path: selectedRepos.find(r => r.name === repo.name)?.path || '',
-                                    files: []
+                                    path: originalRepo?.path || '',
+                                    files: [],
+                                    treeData: repo,
+                                    fileCount: ignoredRepoFiles.length,
+                                    tokenCount: repo.tokenCount
                                 };
                                 selectedFilesData.push(repoEntry);
                             }
@@ -2886,61 +2926,92 @@
                     });
                 }
                 
-                // Include file tree if enabled
-                if (includeFileTree.checked) {
-                    const fileTree = generateFileTree(selectedFilesData);
-                    content += 'FILE TREE STRUCTURE:\n';
-                    content += '='.repeat(80) + '\n\n';
-                    content += fileTree;
-                    content += '='.repeat(80) + '\n\n';
+                // Add content in the specified order
+                
+                // 1. Prompt Text (highest level) - if selected
+                if (includePromptCheckbox.checked && promptInputElement.value.trim()) {
+                    content += promptInputElement.value.trim();
+                    // Add a separator after the prompt text if there's more content coming
+                    if (includeFileTreeCheckbox.checked || includeRepoContextCheckbox.checked) {
+                        content += `\n\n${'='.repeat(80)}\n\n`;
+                    }
                 }
                 
-                // Format repository content
-                selectedFilesData.forEach(repo => {
-                    content += `\n${'=' * 80}\n`;
-                    content += `REPOSITORY: ${repo.name}\n`;
-                    content += `${'=' * 80}\n\n`;
-                    
-                    repo.files.forEach(file => {
-                        content += `${file.path}:\n${file.content || ''}\n\n`;
-                    });
-                });
-            }
-            
-            // Include prompt text if enabled
-            if (includePrompt.checked && promptInput.value.trim()) {
-                if (content) {
-                    // Add a clear separator and label for the prompt text
-                    content += `\n${'=' * 80}\n`;
-                    content += `USER PROMPT:\n`;
-                    content += `${'=' * 80}\n\n`;
+                // 2. File Tree (next level) - if selected
+                if (includeFileTreeCheckbox.checked && selectedFilesData.length > 0) {
+                    content += 'FILE TREE STRUCTURE:\n';
+                    content += '='.repeat(80) + '\n\n';
+                    content += generateFileTree(selectedFilesData);
+                    // Add a separator after the file tree if repository context is coming
+                    if (includeRepoContextCheckbox.checked) {
+                        content += '='.repeat(80) + '\n\n';
+                    }
                 }
-                content += promptInput.value.trim();
-            }
-            
-            // Copy to clipboard
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(content)
-                    .then(() => {
-                        showNotification('📋 Content copied to clipboard!', 'success');
-                    })
-                    .catch(err => {
-                        // Fall back to server-side API if browser API fails
-                        axios.post('/api/copy-to-clipboard', { text: content })
-                            .then(response => {
-                                showNotification('📋 Content copied to clipboard!', 'success');
-                            })
-                            .catch(error => {
-                                showNotification('Error copying to clipboard: ' + error.message, 'error');
-                            });
+                
+                // 3. Repository Context (comes last) - if selected
+                if (includeRepoContextCheckbox.checked && selectedFilesData.length > 0) {
+                    selectedFilesData.forEach(repo => {
+                        content += `REPOSITORY: ${repo.name}\n`;
+                        content += '='.repeat(80) + '\n\n';
+                        
+                        repo.files.forEach(file => {
+                            content += `${file.path}:\n${file.content || ''}\n\n`;
+                        });
                     });
-            } else {
-                // Fall back to server-side API if browser API is not available
-                axios.post('/api/copy-to-clipboard', { text: content })
+                }
+                
+                if (content.trim() === '') {
+                    showNotification('No content to copy. Select copy options and ensure files are selected.', 'warning');
+                    return;
+                }
+                
+                // Copy to clipboard - try browser API first
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(content)
+                        .then(() => {
+                            showNotification('📋 Content copied to clipboard!', 'success');
+                        })
+                        .catch(err => {
+                            console.error('Clipboard API error:', err);
+                            // Fall back to server-side API if browser API fails
+                            fallbackCopyToClipboard({ text: content });
+                        });
+                } else {
+                    // Fall back to server-side API if browser API is not available
+                    fallbackCopyToClipboard({ text: content });
+                }
+            } catch (error) {
+                console.error('Error in copyPromptWithSettings:', error);
+                showNotification('Error copying to clipboard: ' + error.message, 'error');
+            }
+        }
+        
+        // Update the fallback function to handle direct text copying
+        function fallbackCopyToClipboard(data) {
+            // Check if we're copying raw text or repo data
+            if (data.text) {
+                // Direct text copy
+                axios.post('/api/copy-to-clipboard', { text: data.text })
                     .then(response => {
                         showNotification('📋 Content copied to clipboard!', 'success');
                     })
                     .catch(error => {
+                        console.error('Server clipboard API error:', error);
+                        showNotification('Error copying to clipboard: ' + error.message, 'error');
+                    });
+            } else {
+                // Repository data copy (original functionality)
+                axios.post('/api/copy-to-clipboard', { selectedRepos: data })
+                    .then(response => {
+                        let totalFiles = 0;
+                        data.forEach(repo => {
+                            totalFiles += repo.files.length;
+                        });
+                        
+                        showNotification(`📋 ${totalFiles} files copied to clipboard!`, 'success');
+                    })
+                    .catch(error => {
+                        console.error('Server clipboard API error:', error);
                         showNotification('Error copying to clipboard: ' + error.message, 'error');
                     });
             }
@@ -3543,6 +3614,35 @@
             
             return tree;
         }
+
+        // Add script to handle copy settings panel collapse/expand
+        const copySettingsHeader = document.getElementById('copy-settings-header');
+        const copySettingsContent = document.querySelector('.copy-settings-content');
+        const copySettingsBtn = copySettingsHeader.querySelector('.expand-collapse-btn');
+        
+        function toggleCopySettings(e) {
+            if (e && e.target.classList.contains('expand-collapse-btn')) {
+                e.stopPropagation();
+            }
+            
+            copySettingsContent.classList.toggle('hidden');
+            if (copySettingsContent.classList.contains('hidden')) {
+                copySettingsBtn.textContent = 'Expand ▼';
+            } else {
+                copySettingsBtn.textContent = 'Collapse ▲';
+            }
+        }
+        
+        copySettingsHeader.addEventListener('click', function(e) {
+            // Don't toggle if clicking directly on the button (it has its own handler)
+            if (e.target.classList.contains('expand-collapse-btn')) return;
+            toggleCopySettings(e);
+        });
+        
+        copySettingsBtn.addEventListener('click', function(e) {
+            e.stopPropagation(); // Prevent the header click handler from firing
+            toggleCopySettings(e);
+        });
     });
 </script>
 
@@ -3919,10 +4019,11 @@
     .tree-checkbox:checked::after {
         content: "✓";
         position: absolute;
-        top: -2px;
-        left: 2px;
         color: white;
         font-size: 12px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
         font-weight: bold;
     }
     
@@ -3934,10 +4035,11 @@
     .tree-checkbox.indeterminate::after {
         content: "-";
         position: absolute;
-        top: -4px;
-        left: 3px;
         color: white;
         font-size: 14px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
         font-weight: bold;
     }
     
@@ -4047,6 +4149,184 @@
     
     .setting-item span {
         user-select: none;
+    }
+
+    /* Update Create Prompt section styles */
+    #step-create-prompt {
+        max-width: 800px;
+        width: auto;
+        margin: 0 auto;
+    }
+
+    /* Copy Settings Panel styles */
+    .copy-settings-content {
+        padding: 1rem;
+    }
+
+    .settings-group {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .setting-item {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.75rem;
+        align-items: start;
+        cursor: pointer;
+        padding: 0.5rem;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+    }
+
+    .setting-item:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .setting-item input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin-top: 3px;
+    }
+
+    .setting-label {
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    .setting-description {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        grid-column: 2;
+        grid-row: 2;
+    }
+
+    /* Prompt Input styles */
+    .prompt-input {
+        width: 100%;
+        min-height: 150px;
+        padding: 1rem;
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-family: monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        resize: vertical;
+        margin-bottom: 1rem;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+    
+    .prompt-input:focus {
+        outline: none;
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 2px var(--accent-color-transparent);
+    }
+    
+    .copy-settings {
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+    
+    .copy-settings h4 {
+        margin: 0 0 0.75rem 0;
+        color: var(--text-primary);
+        font-size: 1rem;
+    }
+    
+    .settings-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .setting-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+        padding: 0.5rem;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+    }
+
+    .setting-item:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .setting-item input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        margin-top: 2px;
+        cursor: pointer;
+        border: 2px solid var(--border-color);
+        border-radius: 3px;
+        background-color: var(--bg-tertiary);
+        appearance: none;
+        -webkit-appearance: none;
+        position: relative;
+        flex-shrink: 0;
+    }
+
+    .setting-item input[type="checkbox"]:checked {
+        background-color: var(--accent-color);
+        border-color: var(--accent-color);
+    }
+
+    .setting-item input[type="checkbox"]:checked::after {
+        content: "✓";
+        position: absolute;
+        color: white;
+        font-size: 12px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+    }
+
+    .setting-info {
+        flex: 1;
+    }
+
+    .setting-label {
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
+    }
+
+    .setting-description {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+    }
+
+    /* Prompt Input styles */
+    .prompt-input {
+        width: 100%;
+        min-height: 150px;
+        padding: 1rem;
+        background-color: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-family: monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        resize: vertical;
+    }
+
+    .prompt-input:focus {
+        outline: none;
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
     }
 </style>
 {% endblock %}
