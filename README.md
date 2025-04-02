@@ -1,6 +1,6 @@
 # Repo Tools
 
-![WebUI Home Page](images/ss1.png)
+![WebUI Home Page](images/ss.png)
 
 ## Install
 
