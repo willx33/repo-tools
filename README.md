@@ -1,67 +1,32 @@
 # Repo Tools
 
-A collection of tools I made to streamline my AI-assisted dev workflows.
+**Copy Content Easily**
 
-## What it does
-
-- **Copy code from local repos** - Grabs context from local git repos, respecting gitignores
-- **Copy code from GitHub repos** - Extracts code from GitHub URLs without cloning
-- **WebUI Interface** - Modern web interface that's actually nice to use
-
-## Install it
+## Install
 
 ```bash
-# Clone & cd into the repo
-git clone [your-repo-url]
-cd repo-tools
-
-# Venv is always a good idea
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate
 
-# Install in dev mode
 pip install -e .
 ```
 
-## Use it
-
-Run it one of two ways:
+## How to use
 
 ```bash
-# Full CLI with menu
+# Use CLI Menu
 repo-tools
 
-# Jump straight to the WebUI
+# Use WebUI
 repo-web
 ```
 
-The WebUI has these cool features:
-- Dark mode (obviously)
-- Search and sort repos/files
-- Copy individual files or whole directories 
-- Collapsible file trees
-- Shows token counts for LLM context limits
+## Features
+- Copy local or remote repositories file context easily
+- Parse XML straight into your local repository
+- Craft prompts with automated context addition
 
-## Local Repo Copier
-
-This grabs code from your local repos:
-
-1. Choose a repo from the list
-2. Select files you want (or let it handle things automatically)
-3. Click "Copy Selected" or copy individual files
-4. Paste directly to your AI assistant
-
-## GitHub Repo Copier
-
-Same deal but for GitHub repos:
-
-1. Paste a GitHub URL
-2. Select what you need
-3. Copy & paste to your AI
-
-## Command Line Options
-
-If you're running the WebUI directly with `repo-web`:
+## More CLI Options
 
 ```bash
 # Run in debug mode
@@ -73,5 +38,3 @@ repo-web --no-browser
 # Run in the background
 repo-web --background
 ```
-
-That's it! Made by me with ❤️
