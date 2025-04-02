@@ -201,6 +201,10 @@
 <div class="workflow-step hidden" id="step-create-prompt">
     <h3>✍️ Optional: Create Prompt</h3>
     
+    <div class="action-buttons" style="margin-bottom: 20px;">
+        <button id="prompt-copy-button" class="btn btn-primary">📋 Copy to Clipboard</button>
+    </div>
+    
     <!-- Copy Settings Panel -->
     <div class="summary-box">
         <div class="summary-header" id="copy-settings-header">
@@ -210,10 +214,10 @@
         <div class="copy-settings-content">
             <div class="settings-group">
                 <div class="setting-item">
-                    <input type="checkbox" id="include-repo-context" class="tree-checkbox" checked>
+                    <input type="checkbox" id="include-prompt" class="tree-checkbox" checked>
                     <div class="setting-info">
-                        <div class="setting-label">Repository Context</div>
-                        <div class="setting-description">Include selected files and their contents</div>
+                        <div class="setting-label">Prompt Text</div>
+                        <div class="setting-description">Include your custom prompt text</div>
                     </div>
                 </div>
                 <div class="setting-item">
@@ -224,10 +228,10 @@
                     </div>
                 </div>
                 <div class="setting-item">
-                    <input type="checkbox" id="include-prompt" class="tree-checkbox" checked>
+                    <input type="checkbox" id="include-repo-context" class="tree-checkbox" checked>
                     <div class="setting-info">
-                        <div class="setting-label">Prompt Text</div>
-                        <div class="setting-description">Include your custom prompt text</div>
+                        <div class="setting-label">Repository Context</div>
+                        <div class="setting-description">Include selected files and their contents</div>
                     </div>
                 </div>
                 <hr style="border: none; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 10px 0;">
@@ -257,10 +261,6 @@
             placeholder="Enter your prompt here..."
             rows="10"
         ></textarea>
-    </div>
-    
-    <div class="action-buttons">
-        <button id="prompt-copy-button" class="btn btn-primary">📋 Copy to Clipboard</button>
     </div>
 </div>
 
@@ -548,6 +548,9 @@
                 // Add event listener to the remove button
                 const removeButton = repoItem.querySelector('.repo-remove-btn');
                 removeButton.addEventListener('click', function() {
+                    // Store current scroll position
+                    const scrollTop = window.scrollY || document.documentElement.scrollTop;
+                    
                     const repoId = this.dataset.repoId;
                     
                     // Remove from selectedRepoIds
@@ -564,6 +567,9 @@
                     
                     // Update UI
                     updateSelectionCount();
+                    
+                    // Restore scroll position
+                    window.scrollTo(0, scrollTop);
                 });
             });
         }
@@ -937,28 +943,18 @@
                     const isSelected = e.target.checked;
                     updateSelectionState(repo, isSelected);
                     
+                    // Store expansion state in a temporary variable that will be accessed during rendering
+                    window._pendingExpansionState = {
+                        repoName: repo.name,
+                        isRepoExpanded: isRepoExpanded,
+                        expandedDirs: expandedDirs
+                    };
+                    
                     // Re-render tree immediately to reflect changes
                     renderFileTree();
                     
-                    // Restore expansion state
-                    setTimeout(() => {
-                        const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);
-                        if (repoElement) {
-                            // Restore repo expansion state
-                            const repoContent = repoElement.querySelector('.tree-repo-content');
-                            const collapseExpandIndicator = repoElement.querySelector('.tree-repo-collapse-indicator');
-                            
-                            if (isRepoExpanded) {
-                                repoContent.classList.remove('hidden');
-                                collapseExpandIndicator.textContent = '▼'; // Expanded state
-                            }
-                            
-                            // Restore subdirectory expansion state
-                            expandedDirs.forEach(path => {
-                                applyExpansionPath(repoElement, path);
-                            });
-                        }
-                    }, 0);
+                    // Clear the temporary variable
+                    window._pendingExpansionState = null;
                     
                     // Update the summary counts
                     updateFileSummary();
@@ -999,6 +995,13 @@
                 const repoContent = document.createElement('div');
                 repoContent.classList.add('tree-repo-content');
                 repoContent.classList.add('hidden'); // Initially hidden
+                
+                // Check if we should expand this repo based on pending expansion state
+                const repoExpandState = window._pendingExpansionState;
+                if (repoExpandState && repoExpandState.repoName === repo.name && repoExpandState.isRepoExpanded) {
+                    repoContent.classList.remove('hidden');
+                    collapseExpandIndicator.textContent = '▼'; // Expanded state
+                }
                 
                 // Get all top-level children (files and directories)
                 const sortedChildren = Object.values(repo.children)
@@ -1084,6 +1087,14 @@
                 repoElement.appendChild(repoHeader);
                 repoElement.appendChild(repoContent);
                 fileTree.appendChild(repoElement);
+                
+                // Apply expanded directories from pending state (if any)
+                const pendingDirState = window._pendingExpansionState;
+                if (pendingDirState && pendingDirState.repoName === repo.name && pendingDirState.expandedDirs && pendingDirState.expandedDirs.length > 0) {
+                    pendingDirState.expandedDirs.forEach(path => {
+                        applyExpansionPath(repoElement, path);
+                    });
+                }
             });
             
             // Update the included count with selected token information
@@ -1173,28 +1184,18 @@
                     const isSelected = e.target.checked;
                     updateSelectionState(repo, isSelected);
                     
+                    // Store expansion state in a temporary variable that will be accessed during rendering
+                    window._pendingExpansionState = {
+                        repoName: repo.name,
+                        isRepoExpanded: isRepoExpanded,
+                        expandedDirs: expandedDirs
+                    };
+                    
                     // Re-render tree immediately to reflect changes
                     renderIgnoredFileTree();
                     
-                    // Restore expansion state
-                    setTimeout(() => {
-                        const repoElement = ignoredFileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);
-                        if (repoElement) {
-                            // Restore repo expansion state
-                            const repoContent = repoElement.querySelector('.tree-repo-content');
-                            const collapseExpandIndicator = repoElement.querySelector('.tree-repo-collapse-indicator');
-                            
-                            if (isRepoExpanded) {
-                                repoContent.classList.remove('hidden');
-                                collapseExpandIndicator.textContent = '▼'; // Expanded state
-                            }
-                            
-                            // Restore subdirectory expansion state
-                            expandedDirs.forEach(path => {
-                                applyExpansionPath(repoElement, path);
-                            });
-                        }
-                    }, 0);
+                    // Clear the temporary variable
+                    window._pendingExpansionState = null;
                     
                     // Update the summary counts
                     updateFileSummary();
@@ -1235,6 +1236,13 @@
                 const repoContent = document.createElement('div');
                 repoContent.classList.add('tree-repo-content');
                 repoContent.classList.add('hidden'); // Initially hidden
+                
+                // Check if we should expand this repo based on pending expansion state
+                const repoExpandState = window._pendingExpansionState;
+                if (repoExpandState && repoExpandState.repoName === repo.name && repoExpandState.isRepoExpanded) {
+                    repoContent.classList.remove('hidden');
+                    collapseExpandIndicator.textContent = '▼'; // Expanded state
+                }
                 
                 // Get all top-level children
                 const sortedChildren = Object.values(repo.children)
@@ -1317,6 +1325,14 @@
                 repoElement.appendChild(repoHeader);
                 repoElement.appendChild(repoContent);
                 ignoredFileTree.appendChild(repoElement);
+                
+                // Apply expanded directories from pending state (if any)
+                const pendingDirState = window._pendingExpansionState;
+                if (pendingDirState && pendingDirState.repoName === repo.name && pendingDirState.expandedDirs && pendingDirState.expandedDirs.length > 0) {
+                    pendingDirState.expandedDirs.forEach(path => {
+                        applyExpansionPath(repoElement, path);
+                    });
+                }
             });
             
             // Update the ignored count with selected file information
@@ -3606,6 +3622,9 @@
                 checkbox.checked = selectedRepoIds.includes(repo.id);
                 
                 checkbox.addEventListener('change', function() {
+                    // Store current scroll position
+                    const scrollTop = window.scrollY || document.documentElement.scrollTop;
+                    
                     if (this.checked) {
                         // Add to selected repos
                         if (!selectedRepoIds.includes(repo.id)) {
@@ -3618,7 +3637,11 @@
                             selectedRepoIds.splice(index, 1);
                         }
                     }
+                    
                     updateSelectionCount();
+                    
+                    // Restore scroll position
+                    window.scrollTo(0, scrollTop);
                 });
             });
         }

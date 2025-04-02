@@ -2,16 +2,20 @@
 
 import os
 import json
+import tempfile
+import glob
+import shutil
+import time
 from pathlib import Path
-from flask import render_template, request, jsonify
+from flask import render_template, request, jsonify, Response, redirect, url_for
 from flask_socketio import emit
 
 from repo_tools.webui import app, socketio
-from repo_tools.utils.git import find_git_repos, get_repo_name
+from repo_tools.utils.git import find_git_repos, get_repo_name, get_relevant_files_with_content as process_repository_files
 from repo_tools.utils.clipboard import copy_to_clipboard
 from repo_tools.utils.notifications import show_toast
-from repo_tools.modules import process_repository_files, extract_github_repo_url, clone_github_repo
-from repo_tools.modules import process_xml_changes, preview_xml_changes, XMLParserError
+from repo_tools.modules import extract_github_repo_url, clone_github_repo
+from repo_tools.modules.xml_parser import parse_xml_string, preview_changes, apply_changes, XMLParserError
 
 # Routes
 @app.route('/')
@@ -292,7 +296,7 @@ def parse_xml():
     
     try:
         # Generate preview of changes
-        previews = preview_xml_changes(xml_string, repo_path)
+        previews = preview_changes(xml_string, repo_path)
         
         return jsonify({
             "success": True,
@@ -321,7 +325,7 @@ def apply_xml():
     
     try:
         # Apply changes and get results
-        results = process_xml_changes(xml_string, repo_path)
+        results = apply_changes(xml_string, repo_path)
         
         # Format results for response
         formatted_results = []
@@ -357,6 +361,66 @@ def apply_xml():
     
     except Exception as e:
         return jsonify({"error": f"Error applying changes: {str(e)}"}), 500
+
+@app.route('/api/clear-cache', methods=['POST'])
+def clear_cache():
+    """Clear cache by removing temporary directories and cached data."""
+    try:
+        cleared_files = 0
+        temp_dir = tempfile.gettempdir()
+        
+        # 1. Clear temporary directories created for GitHub clones
+        # Look for directories in the temp folder that have git repositories
+        git_dirs = []
+        for root, dirs, _ in os.walk(temp_dir):
+            if '.git' in dirs:
+                git_dirs.append(root)
+        
+        # Remove the git repositories found in temp directories
+        for git_dir in git_dirs:
+            try:
+                shutil.rmtree(git_dir, ignore_errors=True)
+                cleared_files += 1
+            except Exception as e:
+                print(f"Error removing git directory {git_dir}: {e}")
+        
+        # 2. Find and remove any orphaned temporary directories created by our application
+        # These would typically be directories created by tempfile.mkdtemp()
+        # For extra safety, only clean directories in the temp folder
+        app_temp_pattern = os.path.join(temp_dir, "tmp*")
+        for dirpath in glob.glob(app_temp_pattern):
+            if os.path.isdir(dirpath):
+                try:
+                    # Further safety: check if this is likely one of our temp dirs
+                    # For example, we could look for certain file patterns
+                    # Only remove if it seems to be unused/old
+                    if os.path.getmtime(dirpath) < (time.time() - 3600):  # Older than 1 hour
+                        shutil.rmtree(dirpath, ignore_errors=True)
+                        cleared_files += 1
+                except Exception as e:
+                    print(f"Error removing temp directory {dirpath}: {e}")
+        
+        # 3. Optional: Clear any other application cache
+        app_cache_dir = os.path.join(str(Path.home()), '.cache', 'repo_tools')
+        if os.path.exists(app_cache_dir):
+            try:
+                for item in os.listdir(app_cache_dir):
+                    item_path = os.path.join(app_cache_dir, item)
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path, ignore_errors=True)
+                    else:
+                        os.remove(item_path)
+                cleared_files += 1
+            except Exception as e:
+                print(f"Error clearing application cache: {e}")
+        
+        # Show toast notification
+        message = f"Cache cleared successfully. Removed {cleared_files} items."
+        show_toast(message)
+        
+        return jsonify({"success": True, "message": message})
+    except Exception as e:
+        return jsonify({"error": f"Error clearing cache: {str(e)}"}), 500
 
 # Socket.IO Events
 @socketio.on('connect')
@@ -405,19 +469,21 @@ def handle_scan_repos(data):
 def handle_github_clone(data):
     """Handle GitHub repo cloning via WebSockets."""
     url = data.get('url')
+    repo_path = None
+    
     if not url:
         emit('github_error', {'message': 'No URL provided'})
         return
     
-    # Extract clean GitHub URL using the API layer
-    clean_url = extract_github_repo_url(url)
-    if not clean_url:
-        emit('github_error', {'message': 'Invalid GitHub repository URL'})
-        return
-    
-    emit('github_clone_start', {'url': clean_url})
-    
     try:
+        # Extract clean GitHub URL using the API layer
+        clean_url = extract_github_repo_url(url)
+        if not clean_url:
+            emit('github_error', {'message': 'Invalid GitHub repository URL'})
+            return
+        
+        emit('github_clone_start', {'url': clean_url})
+        
         # Clone the repository using the API layer
         repo_path = clone_github_repo(clean_url)
         if not repo_path:
@@ -450,13 +516,24 @@ def handle_github_clone(data):
             'ignoredCount': len(ignored_files_list)
         })
         
-        # Clean up the temporary directory
-        import subprocess
-        subprocess.run(["rm", "-rf", str(repo_path)], check=False)
-        
     except Exception as e:
         emit('github_error', {'message': f'Error processing repository: {str(e)}'})
-        return
+    finally:
+        # Clean up the temporary directory even if there was an error
+        if repo_path:
+            try:
+                import subprocess
+                import shutil
+                
+                # Try shutil.rmtree first (more reliable on Windows)
+                try:
+                    shutil.rmtree(repo_path, ignore_errors=True)
+                except Exception:
+                    # Fall back to subprocess
+                    subprocess.run(["rm", "-rf", str(repo_path)], check=False)
+            except Exception as cleanup_error:
+                # Just log cleanup errors and continue
+                print(f"Error cleaning up temporary directory: {cleanup_error}")
 
 @socketio.on('github_scan')
 def handle_github_scan(data):
@@ -470,7 +547,7 @@ def handle_github_scan(data):
     
     try:
         # Process repository files using the API layer
-        files_with_content, ignored_files = process_repository_files(repo_path)
+        files_with_content, ignored_files = process_repository_files(Path(repo_path))
         
         # Format response
         included_files = []
@@ -509,7 +586,7 @@ def handle_xml_parse(data):
     
     try:
         # Generate preview of changes
-        previews = preview_xml_changes(xml_string, repo_path)
+        previews = preview_changes(xml_string, repo_path)
         
         emit('xml_parse_complete', {
             "success": True,
@@ -541,7 +618,7 @@ def handle_xml_apply(data):
     
     try:
         # Apply changes and get results
-        results = process_xml_changes(xml_string, repo_path)
+        results = apply_changes(xml_string, repo_path)
         
         # Format results for response
         formatted_results = []
