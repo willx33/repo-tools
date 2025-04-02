@@ -230,6 +230,21 @@
                         <div class="setting-description">Include your custom prompt text</div>
                     </div>
                 </div>
+                <hr style="border: none; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 10px 0;">
+                <div class="setting-item">
+                    <input type="checkbox" id="include-xml-diff" class="tree-checkbox">
+                    <div class="setting-info">
+                        <div class="setting-label">XML Diff</div>
+                        <div class="setting-description">Include XML diff formatting instructions (mutually exclusive with XML Whole)</div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <input type="checkbox" id="include-xml-whole" class="tree-checkbox">
+                    <div class="setting-info">
+                        <div class="setting-label">XML Whole</div>
+                        <div class="setting-description">Include XML whole formatting instructions (mutually exclusive with XML Diff)</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -914,12 +929,36 @@
                 repoCheckbox.addEventListener('change', (e) => {
                     e.stopPropagation();
                     
+                    // Save expansion state before making changes
+                    const expandedDirs = getExpansionState(repo.name);
+                    const isRepoExpanded = !repoElement.querySelector('.tree-repo-content').classList.contains('hidden');
+                    
                     // Apply selection state to repo and all its children
                     const isSelected = e.target.checked;
                     updateSelectionState(repo, isSelected);
                     
                     // Re-render tree immediately to reflect changes
                     renderFileTree();
+                    
+                    // Restore expansion state
+                    setTimeout(() => {
+                        const repoElement = fileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);
+                        if (repoElement) {
+                            // Restore repo expansion state
+                            const repoContent = repoElement.querySelector('.tree-repo-content');
+                            const collapseExpandIndicator = repoElement.querySelector('.tree-repo-collapse-indicator');
+                            
+                            if (isRepoExpanded) {
+                                repoContent.classList.remove('hidden');
+                                collapseExpandIndicator.textContent = '▼'; // Expanded state
+                            }
+                            
+                            // Restore subdirectory expansion state
+                            expandedDirs.forEach(path => {
+                                applyExpansionPath(repoElement, path);
+                            });
+                        }
+                    }, 0);
                     
                     // Update the summary counts
                     updateFileSummary();
@@ -1126,12 +1165,36 @@
                 repoCheckbox.addEventListener('change', (e) => {
                     e.stopPropagation();
                     
+                    // Save expansion state before making changes
+                    const expandedDirs = getExpansionState(repo.name, true);
+                    const isRepoExpanded = !repoElement.querySelector('.tree-repo-content').classList.contains('hidden');
+                    
                     // Apply selection state to repo and all its children
                     const isSelected = e.target.checked;
                     updateSelectionState(repo, isSelected);
                     
                     // Re-render tree immediately to reflect changes
                     renderIgnoredFileTree();
+                    
+                    // Restore expansion state
+                    setTimeout(() => {
+                        const repoElement = ignoredFileTree.querySelector(`.tree-repo[data-name="${repo.name}"]`);
+                        if (repoElement) {
+                            // Restore repo expansion state
+                            const repoContent = repoElement.querySelector('.tree-repo-content');
+                            const collapseExpandIndicator = repoElement.querySelector('.tree-repo-collapse-indicator');
+                            
+                            if (isRepoExpanded) {
+                                repoContent.classList.remove('hidden');
+                                collapseExpandIndicator.textContent = '▼'; // Expanded state
+                            }
+                            
+                            // Restore subdirectory expansion state
+                            expandedDirs.forEach(path => {
+                                applyExpansionPath(repoElement, path);
+                            });
+                        }
+                    }, 0);
                     
                     // Update the summary counts
                     updateFileSummary();
@@ -2930,9 +2993,12 @@
                 
                 // 1. Prompt Text (highest level) - if selected
                 if (includePromptCheckbox.checked && promptInputElement.value.trim()) {
+                    content += 'USER PROMPT:\n';
+                    content += '='.repeat(80) + '\n\n';
                     content += promptInputElement.value.trim();
                     // Add a separator after the prompt text if there's more content coming
-                    if (includeFileTreeCheckbox.checked || includeRepoContextCheckbox.checked) {
+                    if (includeFileTreeCheckbox.checked || includeRepoContextCheckbox.checked || 
+                        includeXmlDiffCheckbox.checked || includeXmlWholeCheckbox.checked) {
                         content += `\n\n${'='.repeat(80)}\n\n`;
                     }
                 }
@@ -2969,11 +3035,23 @@
                 if (navigator.clipboard && navigator.clipboard.writeText) {
                     navigator.clipboard.writeText(content)
                         .then(() => {
-                            showNotification('📋 Content copied to clipboard!', 'success');
+                            // Create a custom success message based on enabled options
+                            const enabledOptions = [];
+                            if (includePromptCheckbox.checked) enabledOptions.push("Prompt Text");
+                            if (includeFileTreeCheckbox.checked) enabledOptions.push("File Tree");
+                            if (includeRepoContextCheckbox.checked) enabledOptions.push("Repository Context");
+                            if (includeXmlDiffCheckbox.checked) enabledOptions.push("XML Diff");
+                            if (includeXmlWholeCheckbox.checked) enabledOptions.push("XML Whole");
+                            
+                            const successMessage = enabledOptions.length > 0 
+                                ? `📋 ${enabledOptions.join(' + ')} copied to clipboard!`
+                                : '📋 Content copied to clipboard!';
+                                
+                            showNotification(successMessage, 'success');
                         })
                         .catch(err => {
                             console.error('Clipboard API error:', err);
-                            // Fall back to server-side API if browser API fails
+                            // Fall back to the server-side API if browser API fails
                             fallbackCopyToClipboard({ text: content });
                         });
                 } else {
@@ -2990,10 +3068,34 @@
         function fallbackCopyToClipboard(data) {
             // Check if we're copying raw text or repo data
             if (data.text) {
+                // Check if we're in the prompt view and need to create a custom message
+                const includeRepoContextCheckbox = document.querySelector('#step-create-prompt #include-repo-context');
+                const includeFileTreeCheckbox = document.querySelector('#step-create-prompt #include-file-tree');
+                const includePromptCheckbox = document.querySelector('#step-create-prompt #include-prompt');
+                const includeXmlDiffCheckbox = document.querySelector('#step-create-prompt #include-xml-diff');
+                const includeXmlWholeCheckbox = document.querySelector('#step-create-prompt #include-xml-whole');
+                
                 // Direct text copy
                 axios.post('/api/copy-to-clipboard', { text: data.text })
                     .then(response => {
-                        showNotification('📋 Content copied to clipboard!', 'success');
+                        // Create a custom success message if we're in the prompt view
+                        if (includeRepoContextCheckbox && includeFileTreeCheckbox && includePromptCheckbox && 
+                            includeXmlDiffCheckbox && includeXmlWholeCheckbox) {
+                            const enabledOptions = [];
+                            if (includePromptCheckbox.checked) enabledOptions.push("Prompt Text");
+                            if (includeFileTreeCheckbox.checked) enabledOptions.push("File Tree");
+                            if (includeRepoContextCheckbox.checked) enabledOptions.push("Repository Context");
+                            if (includeXmlDiffCheckbox.checked) enabledOptions.push("XML Diff");
+                            if (includeXmlWholeCheckbox.checked) enabledOptions.push("XML Whole");
+                            
+                            const successMessage = enabledOptions.length > 0 
+                                ? `📋 ${enabledOptions.join(' + ')} copied to clipboard!`
+                                : '📋 Content copied to clipboard!';
+                                
+                            showNotification(successMessage, 'success');
+                        } else {
+                            showNotification('📋 Content copied to clipboard!', 'success');
+                        }
                     })
                     .catch(error => {
                         console.error('Server clipboard API error:', error);
@@ -3559,8 +3661,8 @@
                 if (!treeData) return;
                 
                 // Add repository name as root with stats
-                tree += `📦 ${repo.name}\n`;
-                tree += `${repo.fileCount} files · ~${formatTokenCount(repo.tokenCount)} tokens\n\n`;
+                tree += `${repo.name}\n`;
+                tree += `${repo.fileCount} files\n\n`;
                 
                 // Function to recursively build the tree
                 function buildTree(node, prefix = '') {
@@ -3582,27 +3684,12 @@
                         if (child.type === 'directory') {
                             // Only show directories that have selected files
                             if (child.selected || child.indeterminate) {
-                                tree += `${linePrefix}📂 ${child.name}\n`;
-                                if (child.fileCount > 0) {
-                                    tree += `${nextPrefix}${child.fileCount} files · ~${formatTokenCount(child.tokenCount)} tokens\n`;
-                                }
+                                tree += `${linePrefix}${child.name}\n`;
                                 buildTree(child, nextPrefix);
                             }
                         } else if (child.type === 'file' && child.selected) {
-                            // Show selected files with appropriate icons
-                            const ext = child.name.split('.').pop().toLowerCase();
-                            let icon = '📄';
-                            if (ext === 'py') icon = '🐍';
-                            else if (ext === 'md') icon = '📝';
-                            else if (['json', 'toml', 'yaml', 'yml'].includes(ext)) icon = '⚙️';
-                            else if (['html', 'css', 'js'].includes(ext)) icon = '📄';
-                            
-                            tree += `${linePrefix}${icon} ${child.name}`;
-                            if (child.tokenCount) {
-                                tree += ` ~${child.tokenCount}\n`;
-                            } else {
-                                tree += '\n';
-                            }
+                            // Show selected files without icons
+                            tree += `${linePrefix}${child.name}\n`;
                         }
                     });
                 }
@@ -3643,6 +3730,665 @@
             e.stopPropagation(); // Prevent the header click handler from firing
             toggleCopySettings(e);
         });
+
+        // XML formatting instructions constants
+        const XML_DIFF_INSTRUCTIONS = `<xml_formatting_instructions>
+### Role
+- You are a **code editing assistant**: You can fulfill edit requests and chat with the user about code or other questions. Provide complete instructions or code lines when replying with xml formatting.
+
+### Capabilities
+- Can create new files.
+- Can rewrite entire files.
+- Can perform partial search/replace modifications.
+- Can delete existing files.
+
+Avoid placeholders like \`...\` or \`// existing code here\`. Provide complete lines or code.
+
+## Tools & Actions
+1. **create** – Create a new file if it doesn't exist.
+2. **rewrite** – Replace the entire content of an existing file.
+3. **modify** (search/replace) – For partial edits with <search> + <content>.
+4. **delete** – Remove a file entirely (empty <content>).
+
+### **Format to Follow for Repo Prompt's Diff Protocol**
+
+<Plan>
+Describe your approach or reasoning here.
+</Plan>
+
+<file path="path/to/example.swift" action="one_of_the_tools">
+  <change>
+    <description>Brief explanation of this specific change</description>
+    <search>
+===
+// Exactly matching lines to find
+===
+    </search>
+    <content>
+===
+// Provide the new or updated code here. Do not use placeholders
+===
+    </content>
+  </change>
+  <!-- Add more <change> blocks if you have multiple edits for the same file -->
+</file>
+
+#### Tools Demonstration
+1. \`<file path="NewFile.swift" action="create">\` – Full file in <content>
+2. \`<file path="DeleteMe.swift" action="delete">\` – Empty <content>
+3. \`<file path="ModifyMe.swift" action="modify">\` – Partial edit with \`<search>\` + \`<content>\`
+4. \`<file path="RewriteMe.swift" action="rewrite">\` – Entire file in <content>
+5. \`<file path="RewriteMe.swift" action="rewrite">\` – Entire file in <content>. No <search> required.
+
+## Format Guidelines
+1. **Plan**: Begin with a \`<Plan>\` block explaining your approach.
+2. **<file> Tag**: e.g. \`<file path="Models/User.swift" action="...">\`. Must match an available tool.
+3. **<change> Tag**: Provide \`<description>\` to clarify each change. Then \`<content>\` for new/modified code. Additional rules depend on your capabilities.
+4. **modify**: **<search> & <content>**: Provide code blocks enclosed by ===. Respect indentation exactly, ensuring the <search> block matches the original source down to braces, spacing, and any comments. The new <content> will replace the <search> block, and should should fit perfectly in the space left by it's removal.
+5. **modify**: For changes to the same file, ensure that you use multiple change blocks, rather than separate file blocks.
+6. **rewrite**: For large overhauls; omit \`<search>\` and put the entire file in \`<content>\`.
+7. **create**: For new files, put the full file in <content>.
+8. **delete**: Provide an empty <content>. The file is removed.
+
+## Code Examples
+
+-----
+### Example: Search and Replace (Add email property)
+<Plan>
+Add an email property to \`User\` via search/replace.
+</Plan>
+
+<file path="Models/User.swift" action="modify">
+  <change>
+    <description>Add email property to User struct</description>
+    <search>
+===
+struct User {
+    let id: UUID
+    var name: String
+}
+===
+    </search>
+    <content>
+===
+struct User {
+    let id: UUID
+    var name: String
+    var email: String
+}
+===
+    </content>
+  </change>
+</file>
+
+-----
+### Example: Negative Example - Mismatched Search Block
+// Example Input (not part of final output, just demonstration)
+<file_contents>
+File: path/service.swift
+\`\`\`
+import Foundation
+class Example {
+    foo() {
+        Bar()
+    }
+}
+\`\`\`
+</file_contents>
+
+<Plan>
+Demonstrate how a mismatched search block leads to failed merges.
+</Plan>
+
+<file path="path/service.swift" action="modify">
+  <change>
+    <description>This search block is missing or has mismatched indentation, braces, etc.</description>
+    <search>
+===
+    foo() {
+        Bar()
+    }
+===
+    </search>
+    <content>
+===
+    foo() {
+        Bar()
+        Bar2()
+    }
+===
+    </content>
+  </change>
+</file>
+
+<!-- This example fails because the <search> block doesn't exactly match the original file contents. -->
+
+-----
+### Example: Negative Example - Mismatched Brace Balance
+// This negative example shows how adding extra braces in the <content> can break brace matching.
+<Plan>
+Demonstrate that the new content block has one extra closing brace, causing mismatched braces.
+</Plan>
+
+<file path="Functions/MismatchedBracesExample.swift" action="modify">
+  <change>
+    <description>Mismatched brace balance in the replacement content</description>
+    <search>
+===
+    foo() {
+        Bar()
+    }
+===
+    </search>
+    <content>
+===
+    foo() {
+        Bar()
+    }
+
+    bar() {
+        foo2()
+    }
+}
+===
+    </content>
+  </change>
+</file>
+
+<!-- Because the <search> block was only a small brace segment, adding extra braces in <content> breaks the balance. -->
+
+-----
+### Example: Negative Example - One-Line Search Block
+<Plan>
+Demonstrate a one-line search block, which is too short to be reliable.
+</Plan>
+
+<file path="path/service.swift" action="modify">
+  <change>
+    <description>One-line search block is ambiguous</description>
+    <search>
+===
+var email: String
+===
+    </search>
+    <content>
+===
+var emailNew: String
+===
+    </content>
+  </change>
+</file>
+
+<!-- This example fails because the <search> block is only one line and ambiguous. -->
+
+-----
+### Example: Negative Example - Ambiguous Search Block
+<Plan>
+Demonstrate an ambiguous search block that can match multiple blocks (e.g., multiple closing braces).
+</Plan>
+
+<file path="path/service.swift" action="modify">
+  <change>
+    <description>Ambiguous search block with multiple closing braces</description>
+    <search>
+===
+    }
+}
+===
+    </search>
+    <content>
+===
+        foo() {
+        }
+    }
+}
+===
+    </content>
+  </change>
+</file>
+
+<!-- This example fails because the <search> block is ambiguous due to multiple matching closing braces. -->
+
+-----
+### Example: Full File Rewrite
+<Plan>
+Rewrite the entire User file to include an email property.
+</Plan>
+
+<file path="Models/User.swift" action="rewrite">
+  <change>
+    <description>Full file rewrite with new email field</description>
+    <content>
+===
+import Foundation
+struct User {
+    let id: UUID
+    var name: String
+    var email: String
+
+    init(name: String, email: String) {
+        self.id = UUID()
+        self.name = name
+        self.email = email
+    }
+}
+===
+    </content>
+  </change>
+</file>
+
+-----
+### Example: Create New File
+<Plan>
+Create a new RoundedButton for a custom Swift UIButton subclass.
+</Plan>
+
+<file path="Views/RoundedButton.swift" action="create">
+  <change>
+    <description>Create custom RoundedButton class</description>
+    <content>
+===
+import UIKit
+@IBDesignable
+class RoundedButton: UIButton {
+    @IBInspectable var cornerRadius: CGFloat = 0
+}
+===
+    </content>
+  </change>
+</file>
+
+-----
+### Example: Delete a File
+<Plan>
+Remove an obsolete file.
+</Plan>
+
+<file path="Obsolete/File.swift" action="delete">
+  <change>
+    <description>Completely remove the file from the project</description>
+    <content>
+===
+===
+    </content>
+  </change>
+</file>
+
+## Final Notes
+1. **modify** Always wrap the exact original lines in <search> and your updated lines in <content>, each enclosed by ===.
+2. **modify** The <search> block must match the source code exactly—down to indentation, braces, spacing, and any comments. Even a minor mismatch causes failed merges.
+3. **modify** Only replace exactly what you need. Avoid including entire functions or files if only a small snippet changes, and ensure the <search> content is unique and easy to identify.
+4. **rewrite** Use \`rewrite\` for major overhauls, and \`modify\` for smaller, localized edits. Rewrite requires the entire code to be replaced, so use it sparingly.
+5. You can always **create** new files and **delete** existing files. Provide full code for create, and empty content for delete. Avoid creating files you know exist already.
+6. If a file tree is provided, place your files logically within that structure. Respect the user's relative or absolute paths.
+7. Wrap your final output in \`\`\`XML ... \`\`\` for clarity.
+8. **Important:** Do not wrap any XML output in CDATA tags (i.e. \`<![CDATA[ ... ]]>\`). Repo Prompt expects raw XML exactly as shown in the examples.
+9. **IMPORTANT** IF MAKING FILE CHANGES, YOU MUST USE THE AVAILABLE XML FORMATTING CAPABILITIES PROVIDED ABOVE - IT IS THE ONLY WAY FOR YOUR CHANGES TO BE APPLIED.
+10. The final output must apply cleanly with no leftover syntax errors.
+</xml_formatting_instructions>`;
+
+        const XML_WHOLE_INSTRUCTIONS = `<xml_formatting_instructions>
+### Role
+- You are a **code editing assistant**: You can fulfill edit requests and chat with the user about code or other questions. Provide complete instructions or code lines when replying with xml formatting.
+
+### Capabilities
+- Can create new files.
+- Can rewrite entire files.
+- Can delete existing files.
+
+Avoid placeholders like \`...\` or \`// existing code here\`. Provide complete lines or code.
+
+## Tools & Actions
+1. **create** – Create a new file if it doesn't exist.
+2. **rewrite** – Replace the entire content of an existing file.
+3. **delete** – Remove a file entirely (empty <content>).
+
+### **Format to Follow for Repo Prompt's Diff Protocol**
+
+<Plan>
+Describe your approach or reasoning here.
+</Plan>
+
+<file path="path/to/example.swift" action="one_of_the_tools">
+  <change>
+    <description>Brief explanation of this specific change</description>
+    <content>
+===
+// Provide the new or updated code here. Do not use placeholders
+===
+    </content>
+  </change>
+</file>
+
+#### Tools Demonstration
+1. \`<file path="NewFile.swift" action="create">\` – Full file in <content>
+2. \`<file path="DeleteMe.swift" action="delete">\` – Empty <content>
+3. \`<file path="RewriteMe.swift" action="rewrite">\` – Entire file in <content>
+
+## Format Guidelines
+1. **Plan**: Begin with a \`<Plan>\` block explaining your approach.
+2. **<file> Tag**: e.g. \`<file path="Models/User.swift" action="...">\`. Must match an available tool.
+3. **<change> Tag**: Provide \`<description>\` to clarify each change. Then \`<content>\` for new/modified code. Additional rules depend on your capabilities.
+4. **rewrite**: Replace the entire file. This is the only way to modify existing files.
+5. **create**: For new files, put the full file in <content>.
+6. **delete**: Provide an empty <content>. The file is removed.
+
+## Code Examples
+
+-----
+### Example: Full File Rewrite
+<Plan>
+Rewrite the entire User file to include an email property.
+</Plan>
+
+<file path="Models/User.swift" action="rewrite">
+  <change>
+    <description>Full file rewrite with new email field</description>
+    <content>
+===
+import Foundation
+struct User {
+    let id: UUID
+    var name: String
+    var email: String
+
+    init(name: String, email: String) {
+        self.id = UUID()
+        self.name = name
+        self.email = email
+    }
+}
+===
+    </content>
+  </change>
+</file>
+
+-----
+### Example: Create New File
+<Plan>
+Create a new RoundedButton for a custom Swift UIButton subclass.
+</Plan>
+
+<file path="Views/RoundedButton.swift" action="create">
+  <change>
+    <description>Create custom RoundedButton class</description>
+    <content>
+===
+import UIKit
+@IBDesignable
+class RoundedButton: UIButton {
+    @IBInspectable var cornerRadius: CGFloat = 0
+}
+===
+    </content>
+  </change>
+</file>
+
+-----
+### Example: Delete a File
+<Plan>
+Remove an obsolete file.
+</Plan>
+
+<file path="Obsolete/File.swift" action="delete">
+  <change>
+    <description>Completely remove the file from the project</description>
+    <content>
+===
+===
+    </content>
+  </change>
+</file>
+
+## Final Notes
+1.  **rewrite**  For rewriting an entire file, place all new content in \`<content>\`. No partial modifications are possible here. Avoid all use of placeholders.
+2. You can always **create** new files and **delete** existing files. Provide full code for create, and empty content for delete. Avoid creating files you know exist already.
+3. If a file tree is provided, place your files logically within that structure. Respect the user's relative or absolute paths.
+4. Wrap your final output in \`\`\`XML ... \`\`\` for clarity.
+5. **Important:** Do not wrap any XML output in CDATA tags (i.e. \`<![CDATA[ ... ]]>\`). Repo Prompt expects raw XML exactly as shown in the examples.
+6. **IMPORTANT** IF MAKING FILE CHANGES, YOU MUST USE THE AVAILABLE XML FORMATTING CAPABILITIES PROVIDED ABOVE - IT IS THE ONLY WAY FOR YOUR CHANGES TO BE APPLIED.
+7. The final output must apply cleanly with no leftover syntax errors.
+</xml_formatting_instructions>`;
+        
+        // Function to handle XML option mutual exclusivity
+        function handleXmlOptionsExclusivity() {
+            const xmlDiffCheckbox = document.getElementById('include-xml-diff');
+            const xmlWholeCheckbox = document.getElementById('include-xml-whole');
+            
+            // Add event listeners for XML Diff checkbox
+            xmlDiffCheckbox.addEventListener('change', function() {
+                if (this.checked && xmlWholeCheckbox.checked) {
+                    // If XML Diff is checked and XML Whole is also checked, uncheck XML Whole
+                    xmlWholeCheckbox.checked = false;
+                }
+            });
+            
+            // Add event listeners for XML Whole checkbox
+            xmlWholeCheckbox.addEventListener('change', function() {
+                if (this.checked && xmlDiffCheckbox.checked) {
+                    // If XML Whole is checked and XML Diff is also checked, uncheck XML Diff
+                    xmlDiffCheckbox.checked = false;
+                }
+            });
+        }
+        
+        // Add event listener after DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            handleXmlOptionsExclusivity();
+        });
+        
+        // Call it immediately in case the DOM is already loaded
+        handleXmlOptionsExclusivity();
+        
+        // Function to generate tree diagram of selected files
+        function generateFileTree(selectedFilesData) {
+            let tree = '';
+            
+            selectedFilesData.forEach(repo => {
+                // Use the existing tree data structure
+                const treeData = repo.treeData;
+                if (!treeData) return;
+                
+                // Add repository name as root with stats
+                tree += `${repo.name}\n`;
+                tree += `${repo.fileCount} files\n\n`;
+                
+                // Function to recursively build the tree
+                function buildTree(node, prefix = '') {
+                    if (!node) return;
+                    
+                    // Sort children: directories first, then files
+                    const children = Object.values(node.children || {}).sort((a, b) => {
+                        if (a.type !== b.type) {
+                            return a.type === 'directory' ? -1 : 1;
+                        }
+                        return a.name.localeCompare(b.name);
+                    });
+                    
+                    children.forEach((child, index) => {
+                        const isLast = index === children.length - 1;
+                        const linePrefix = prefix + (isLast ? '└── ' : '├── ');
+                        const nextPrefix = prefix + (isLast ? '    ' : '│   ');
+                        
+                        if (child.type === 'directory') {
+                            // Only show directories that have selected files
+                            if (child.selected || child.indeterminate) {
+                                tree += `${linePrefix}${child.name}\n`;
+                                buildTree(child, nextPrefix);
+                            }
+                        } else if (child.type === 'file' && child.selected) {
+                            // Show selected files without icons
+                            tree += `${linePrefix}${child.name}\n`;
+                        }
+                    });
+                }
+                
+                // Start building tree from root
+                buildTree(treeData);
+                tree += '\n';
+            });
+            
+            return tree;
+        }
+
+        // Update the copyPromptWithSettings function to include XML instructions
+        function copyPromptWithSettings() {
+            try {
+                // Get correct references to the checkbox elements
+                const includeRepoContextCheckbox = document.querySelector('#step-create-prompt #include-repo-context');
+                const includeFileTreeCheckbox = document.querySelector('#step-create-prompt #include-file-tree');
+                const includePromptCheckbox = document.querySelector('#step-create-prompt #include-prompt');
+                const includeXmlDiffCheckbox = document.querySelector('#step-create-prompt #include-xml-diff');
+                const includeXmlWholeCheckbox = document.querySelector('#step-create-prompt #include-xml-whole');
+                const promptInputElement = document.querySelector('#step-create-prompt #prompt-input');
+                
+                console.log("Copy prompt function called", {
+                    includeRepoContext: includeRepoContextCheckbox?.checked,
+                    includeFileTree: includeFileTreeCheckbox?.checked,
+                    includePrompt: includePromptCheckbox?.checked,
+                    includeXmlDiff: includeXmlDiffCheckbox?.checked,
+                    includeXmlWhole: includeXmlWholeCheckbox?.checked
+                });
+                
+                if (!includeRepoContextCheckbox || !includeFileTreeCheckbox || !includePromptCheckbox || 
+                    !includeXmlDiffCheckbox || !includeXmlWholeCheckbox || !promptInputElement) {
+                    throw new Error("Required elements not found");
+                }
+
+                let content = '';
+                const selectedFilesData = [];
+                
+                // Collect selected files data first
+                if (fileTreeData && fileTreeData.length > 0) {
+                    fileTreeData.forEach(repo => {
+                        const repoFiles = getSelectedFiles(repo);
+                        if (repoFiles.length > 0) {
+                            let repoEntry = selectedFilesData.find(r => r.name === repo.name);
+                            if (!repoEntry) {
+                                repoEntry = {
+                                    name: repo.name,
+                                    path: selectedRepos.find(r => r.name === repo.name)?.path || '',
+                                    files: [],
+                                    treeData: repo,
+                                    fileCount: repoFiles.length,
+                                    tokenCount: repo.tokenCount
+                                };
+                                selectedFilesData.push(repoEntry);
+                            }
+                            repoEntry.files = repoEntry.files.concat(repoFiles);
+                        }
+                    });
+                }
+                
+                // Get selected files from ignored files tree
+                if (ignoredTreeData && ignoredTreeData.length > 0) {
+                    ignoredTreeData.forEach(repo => {
+                        const ignoredRepoFiles = getSelectedFiles(repo);
+                        if (ignoredRepoFiles.length > 0) {
+                            let repoEntry = selectedFilesData.find(r => r.name === repo.name);
+                            if (!repoEntry) {
+                                const originalRepo = selectedRepos.find(r => r.name === repo.name);
+                                repoEntry = {
+                                    name: repo.name,
+                                    path: originalRepo?.path || '',
+                                    files: [],
+                                    treeData: repo,
+                                    fileCount: ignoredRepoFiles.length,
+                                    tokenCount: repo.tokenCount
+                                };
+                                selectedFilesData.push(repoEntry);
+                            }
+                            repoEntry.files = repoEntry.files.concat(ignoredRepoFiles);
+                        }
+                    });
+                }
+                
+                // Add content in the specified order
+                
+                // 1. Prompt Text (highest level) - if selected
+                if (includePromptCheckbox.checked && promptInputElement.value.trim()) {
+                    content += 'USER PROMPT:\n';
+                    content += '='.repeat(80) + '\n\n';
+                    content += promptInputElement.value.trim();
+                    // Add a separator after the prompt text if there's more content coming
+                    if (includeFileTreeCheckbox.checked || includeRepoContextCheckbox.checked || 
+                        includeXmlDiffCheckbox.checked || includeXmlWholeCheckbox.checked) {
+                        content += `\n\n${'='.repeat(80)}\n\n`;
+                    }
+                }
+                
+                // 2. File Tree (next level) - if selected
+                if (includeFileTreeCheckbox.checked && selectedFilesData.length > 0) {
+                    content += 'FILE TREE STRUCTURE:\n';
+                    content += '='.repeat(80) + '\n\n';
+                    content += generateFileTree(selectedFilesData);
+                    // Add a separator after the file tree if repository context is coming
+                    if (includeRepoContextCheckbox.checked || includeXmlDiffCheckbox.checked || includeXmlWholeCheckbox.checked) {
+                        content += '='.repeat(80) + '\n\n';
+                    }
+                }
+                
+                // 3. Repository Context (comes next) - if selected
+                if (includeRepoContextCheckbox.checked && selectedFilesData.length > 0) {
+                    selectedFilesData.forEach(repo => {
+                        content += `REPOSITORY: ${repo.name}\n`;
+                        content += '='.repeat(80) + '\n\n';
+                        
+                        repo.files.forEach(file => {
+                            content += `${file.path}:\n${file.content || ''}\n\n`;
+                        });
+                    });
+                    
+                    // Add a separator after repository context if XML instructions are coming
+                    if (includeXmlDiffCheckbox.checked || includeXmlWholeCheckbox.checked) {
+                        content += '='.repeat(80) + '\n\n';
+                    }
+                }
+                
+                // 4. XML Formatting Instructions (comes last) - if selected
+                if (includeXmlDiffCheckbox.checked) {
+                    content += XML_DIFF_INSTRUCTIONS;
+                } else if (includeXmlWholeCheckbox.checked) {
+                    content += XML_WHOLE_INSTRUCTIONS;
+                }
+                
+                if (content.trim() === '') {
+                    showNotification('No content to copy. Select copy options and ensure files are selected.', 'warning');
+                    return;
+                }
+                
+                // Copy to clipboard - try browser API first
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(content)
+                        .then(() => {
+                            // Create a custom success message based on enabled options
+                            const enabledOptions = [];
+                            if (includePromptCheckbox.checked) enabledOptions.push("Prompt Text");
+                            if (includeFileTreeCheckbox.checked) enabledOptions.push("File Tree");
+                            if (includeRepoContextCheckbox.checked) enabledOptions.push("Repository Context");
+                            if (includeXmlDiffCheckbox.checked) enabledOptions.push("XML Diff");
+                            if (includeXmlWholeCheckbox.checked) enabledOptions.push("XML Whole");
+                            
+                            const successMessage = enabledOptions.length > 0 
+                                ? `📋 ${enabledOptions.join(' + ')} copied to clipboard!`
+                                : '📋 Content copied to clipboard!';
+                                
+                            showNotification(successMessage, 'success');
+                        })
+                        .catch(err => {
+                            console.error('Clipboard API error:', err);
+                            // Fall back to the server-side API if browser API fails
+                            fallbackCopyToClipboard({ text: content });
+                        });
+                } else {
+                    // Fall back to server-side API if browser API is not available
+                    fallbackCopyToClipboard({ text: content });
+                }
+            } catch (error) {
+                console.error('Error in copyPromptWithSettings:', error);
+                showNotification('Error copying to clipboard: ' + error.message, 'error');
+            }
+        }
     });
 </script>
 
