@@ -25,6 +25,25 @@
                     .logo a:active {
                         transform: scale(0.98);
                     }
+                    
+                    /* Matrix background styling */
+                    .matrix-background {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        z-index: -1;
+                        pointer-events: none;
+                        opacity: 0.8;
+                    }
+                    
+                    /* Ensure the app container has proper z-index to appear above matrix */
+                    .app {
+                        position: relative;
+                        z-index: 1;
+                        background: transparent;
+                    }
                 </style>
             </div>
             <nav>
@@ -74,34 +93,148 @@
 
             // Matrix effect configuration - brighter and more noticeable
             const matrix = {
-                fontSize: 16,
-                characters: "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+                fontSize: parseFloat(localStorage.getItem('matrixFontSize') || 0.5),
+                characters: "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン",
                 drops: [],
                 columns: 0,
-                fallSpeed: 1, // Slightly faster
-                color: '#4caf50', // Full color without transparency for primary characters
-                dimColor: '#225a2490', // Dimmer color for trail characters
-                animationId: null // To store animation frame ID
+                fallSpeed: localStorage.getItem('matrixSpeed') || 0.06,
+                density: localStorage.getItem('matrixDensity') || 0.3,
+                colorTheme: localStorage.getItem('matrixColor') || 'green',
+                colors: {
+                    green: {
+                        leading: 'rgba(112, 255, 117, [opacity])',
+                        trail: 'rgba(34, 90, 36, [opacity])',
+                        glow: '#4caf5030'
+                    },
+                    white: {
+                        leading: 'rgba(255, 255, 255, [opacity])',
+                        trail: 'rgba(180, 180, 180, [opacity])',
+                        glow: '#ffffff30'
+                    },
+                    neon: {
+                        leading: 'rgba(88, 181, 255, [opacity])',
+                        trail: 'rgba(30, 82, 148, [opacity])',
+                        glow: '#0077ff30'
+                    },
+                    // Rainbow and random are handled in getColors()
+                },
+                animationId: null,
+                frameCount: 0,
+                maxDrops: 1000 // Will be calculated based on density
             };
             
-            // Initialize drops array - with varied density
+            // Function to get colors based on current theme
+            function getColors(j, drop) {
+                const opacity = (10 - j) / 10;
+                const trailOpacity = (opacity * 0.7);
+                
+                if (matrix.colorTheme === 'rainbow') {
+                    // Each column gets a different color on the rainbow
+                    const hue = (drop.column * 37) % 360; // Distribute colors
+                    return {
+                        leading: `hsla(${hue}, 100%, 70%, ${opacity})`,
+                        trail: `hsla(${hue}, 70%, 40%, ${trailOpacity})`,
+                        glow: `hsla(${hue}, 100%, 50%, 0.3)`
+                    };
+                } else if (matrix.colorTheme === 'random') {
+                    // Random color for each drop
+                    return {
+                        leading: `hsla(${drop.colorHue}, 100%, 70%, ${opacity})`,
+                        trail: `hsla(${drop.colorHue}, 70%, 40%, ${trailOpacity})`,
+                        glow: `hsla(${drop.colorHue}, 100%, 50%, 0.3)`
+                    };
+                } else {
+                    // Standard theme
+                    const theme = matrix.colors[matrix.colorTheme] || matrix.colors.green;
+                    return {
+                        leading: theme.leading.replace('[opacity]', opacity),
+                        trail: theme.trail.replace('[opacity]', trailOpacity),
+                        glow: theme.glow
+                    };
+                }
+            }
+            
+            // Calculate font size from slider value
+            function calculateFontSize() {
+                const sliderValue = parseFloat(matrix.fontSize);
+                return Math.max(4, Math.pow(sliderValue, 3) * 40 + 4);
+            }
+            
+            // Create a single drop
+            function createDrop(column, yPos = null) {
+                // Random character
+                const character = matrix.characters.charAt(Math.floor(Math.random() * matrix.characters.length));
+                
+                // Start with random position - use different ranges to create more randomness
+                // Sometimes start above screen, sometimes on screen
+                const startPosition = yPos !== null 
+                    ? yPos 
+                    : (Math.random() > 0.7 
+                        ? Math.random() * (canvas.height / calculateFontSize()) // Already on screen
+                        : -Math.random() * 10); // Above screen with random offset
+                
+                // Random fall speed variation factor (0.7-1.3) to create desynchronized movement
+                const speedFactor = 0.7 + Math.random() * 0.6;
+                
+                if (matrix.colorTheme === 'random') {
+                    return {
+                        column: column,
+                        position: startPosition,
+                        character: character,
+                        colorHue: Math.floor(Math.random() * 360),
+                        active: true,
+                        speedFactor: speedFactor,
+                        // Random update frequency - makes some characters change more often than others
+                        updateFrequency: Math.random() > 0.7 ? 0.05 : 0.01
+                    };
+                } else {
+                    return {
+                        column: column,
+                        position: startPosition,
+                        character: character,
+                        active: true,
+                        speedFactor: speedFactor,
+                        updateFrequency: Math.random() > 0.7 ? 0.05 : 0.01
+                    };
+                }
+            }
+            
+            // Initialize drops array
             function initDrops() {
-                matrix.columns = Math.floor(canvas.width / matrix.fontSize);
+                // Clear previous drops
                 matrix.drops = [];
                 
-                // Use fewer columns for a cleaner look (only use 60% of possible columns)
-                const usedColumns = Math.floor(matrix.columns * 0.6);
-                const skipFactor = Math.floor(matrix.columns / usedColumns);
+                const actualFontSize = calculateFontSize();
+                matrix.columns = Math.floor(canvas.width / actualFontSize);
                 
+                // Calculate max drops based on density (cubic function for dramatic effect)
+                // Density 0.1 = very few, Density 1.0 = lots of drops
+                const rawDensity = parseFloat(matrix.density) || 0.3;
+                const scaledDensity = Math.pow(rawDensity, 3);
+                
+                // Calculate how many drops we should have based on screen size and density
+                const screenArea = canvas.width * canvas.height;
+                const maxPossibleDrops = Math.floor(screenArea / (actualFontSize * actualFontSize * 5)); 
+                matrix.maxDrops = Math.max(10, Math.min(5000, Math.ceil(maxPossibleDrops * scaledDensity)));
+                
+                // Create initial drops - distribute randomly across columns and heights
+                // We'll start with a full distribution to avoid the "wave" effect
+                const initialDrops = Math.ceil(matrix.maxDrops * 0.8); 
+                
+                // First pass - ensure every column has at least one drop to avoid clumping
                 for (let i = 0; i < matrix.columns; i++) {
-                    // Only create drops for some columns for a less dense effect
-                    if (i % skipFactor === 0 || Math.random() > 0.7) {
-                        // Random starting position, some already on screen, others above
-                        matrix.drops[i] = Math.random() * -50;
-                    } else {
-                        // Mark unused columns
-                        matrix.drops[i] = null;
+                    if (Math.random() < scaledDensity) { // Only place initial drops based on density
+                        const randomHeight = Math.random() * canvas.height / actualFontSize;
+                        matrix.drops.push(createDrop(i, randomHeight));
                     }
+                }
+                
+                // Second pass - add remaining drops with completely random distribution
+                const remainingDrops = initialDrops - matrix.drops.length;
+                for (let i = 0; i < remainingDrops; i++) {
+                    const randomColumn = Math.floor(Math.random() * matrix.columns);
+                    const randomHeight = Math.random() * canvas.height / actualFontSize;
+                    matrix.drops.push(createDrop(randomColumn, randomHeight));
                 }
             }
             
@@ -110,56 +243,147 @@
             
             // Draw function
             function draw() {
-                // More transparent background for better visibility of the characters
-                ctx.fillStyle = 'rgba(18, 18, 18, 0.1)';
+                // Clear the canvas completely on each frame to prevent color build-up
+                ctx.fillStyle = 'rgba(0, 0, 0, 1)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 
-                // Create a glow effect for brighter characters
-                ctx.shadowBlur = 5;
-                ctx.shadowColor = '#4caf5050';
+                // Increment frame counter (used for rainbow mode)
+                matrix.frameCount++;
                 
+                const actualFontSize = calculateFontSize();
+                
+                // Track active drops to maintain proper density
+                let activeDrops = 0;
+                
+                // Process all drops
                 for (let i = 0; i < matrix.drops.length; i++) {
-                    // Skip null drops (columns we're not using)
-                    if (matrix.drops[i] === null) continue;
+                    if (!matrix.drops[i].active) continue;
                     
-                    // Random character from character set
-                    const character = matrix.characters.charAt(Math.floor(Math.random() * matrix.characters.length));
+                    activeDrops++;
+                    const drop = matrix.drops[i];
+                    const yPos = Math.floor(drop.position * actualFontSize);
                     
-                    // Calculate y position
-                    const yPos = matrix.drops[i] * matrix.fontSize;
+                    // Randomly change the character sometimes to create more visual entropy
+                    if (Math.random() < drop.updateFrequency) {
+                        drop.character = matrix.characters.charAt(Math.floor(Math.random() * matrix.characters.length));
+                    }
                     
-                    // Highlight the first character of each column - creates the leading edge effect
-                    if (Math.random() > 0.98) {
-                        ctx.fillStyle = '#70ff75'; // Bright highlight color
-                        ctx.font = (matrix.fontSize + 2) + 'px monospace';
-                        ctx.shadowBlur = 10; // Extra glow for leading characters
-                    } else if (Math.random() > 0.90) {
-                        ctx.fillStyle = matrix.color; // Main color
-                        ctx.font = matrix.fontSize + 'px monospace';
-                        ctx.shadowBlur = 5;
+                    // Draw a trail of the same character with fading intensity
+                    for (let j = 0; j < 10; j++) {
+                        // Calculate trail position (characters above the current position)
+                        const trailPos = yPos - (j * actualFontSize);
+                        
+                        // Skip if outside canvas
+                        if (trailPos < 0) continue;
+                        
+                        // Get colors for this position
+                        const colors = getColors(j, drop);
+                        
+                        // Leading character (brightest)
+                        if (j === 0) {
+                            ctx.fillStyle = colors.leading;
+                            ctx.shadowBlur = 2;
+                            ctx.shadowColor = colors.glow;
+                        } 
+                        // Trail characters (with fading intensity)
+                        else {
+                            ctx.fillStyle = colors.trail;
+                            ctx.shadowBlur = 0;
+                        }
+                        
+                        ctx.font = Math.round(actualFontSize) + 'px monospace';
+                        ctx.fillText(drop.character, drop.column * actualFontSize, trailPos);
+                    }
+                    
+                    // Apply speed calculation with individual variation for more randomness
+                    const speedMultiplier = parseFloat(matrix.fallSpeed);
+                    // For super high speeds (values 0.5-1.0), use a moderately aggressive calculation
+                    // Old formula had extreme speeds at max value
+                    let baseSpeed;
+                    if (speedMultiplier > 0.5) {
+                        // Reduced the multiplier by half to make it less extreme
+                        baseSpeed = Math.pow(speedMultiplier, 3) * 1250;
                     } else {
-                        ctx.fillStyle = matrix.dimColor; // Dim color for most characters
-                        ctx.font = matrix.fontSize + 'px monospace';
-                        ctx.shadowBlur = 0; // No glow for background characters
+                        // Keep original calculation for lower speeds
+                        baseSpeed = Math.pow(speedMultiplier, 5) * 100;
                     }
+                    const actualSpeed = baseSpeed * drop.speedFactor;
+                    drop.position += actualSpeed;
                     
-                    ctx.fillText(character, i * matrix.fontSize, yPos);
-                    
-                    // Move drop down
-                    matrix.drops[i] += matrix.fallSpeed;
-                    
-                    // Reset to top if drop reaches bottom of screen with some randomness
-                    if (yPos > canvas.height && Math.random() > 0.95) {
-                        matrix.drops[i] = 0;
-                    }
-                    
-                    // Random chance of creating a new stream elsewhere
-                    if (Math.random() > 0.9985) {
-                        const newColumn = Math.floor(Math.random() * matrix.columns);
-                        if (matrix.drops[newColumn] === null) {
-                            matrix.drops[newColumn] = 0;
+                    // Reset drop if it reaches the bottom - with completely random timing
+                    if (yPos > canvas.height) {
+                        // Either recycle the drop or create a new one in a random column
+                        // Use very random rules to avoid synchronized waves
+                        
+                        // Reset vertical position - sometimes with a random delay above screen
+                        drop.position = -Math.random() * 5; // Random start position above screen
+                        
+                        // Assign a new random character when resetting
+                        drop.character = matrix.characters.charAt(Math.floor(Math.random() * matrix.characters.length));
+                        
+                        // Sometimes change columns for more horizontal variation
+                        if (Math.random() > 0.6) {
+                            drop.column = Math.floor(Math.random() * matrix.columns);
+                        }
+                        
+                        // Change speed factor for next iteration
+                        drop.speedFactor = 0.7 + Math.random() * 0.6;
+                        
+                        // New random color for random theme
+                        if (matrix.colorTheme === 'random') {
+                            drop.colorHue = Math.floor(Math.random() * 360);
+                        }
+                        
+                        // Rarely deactivate a drop if we have too many
+                        if (activeDrops > matrix.maxDrops && Math.random() > 0.9) {
+                            drop.active = false;
                         }
                     }
+                }
+                
+                // Add new drops much more randomly
+                const rawDensity = parseFloat(matrix.density) || 0.3;
+                const dropsNeeded = matrix.maxDrops - activeDrops;
+                
+                // Add drops one by one with random chance proportional to density and need
+                // This creates a more natural, continuous rain effect
+                const addChance = (dropsNeeded / matrix.maxDrops) * rawDensity;
+                
+                // Add drops randomly based on density
+                if (Math.random() < addChance) {
+                    // First check if we can reactivate an inactive drop
+                    let reactivated = false;
+                    
+                    if (Math.random() > 0.5) { // 50% chance to try reactivation vs. new drop
+                        for (let j = 0; j < matrix.drops.length; j++) {
+                            if (!matrix.drops[j].active) {
+                                matrix.drops[j].active = true;
+                                matrix.drops[j].position = -Math.random() * 5; // Random start above screen
+                                matrix.drops[j].column = Math.floor(Math.random() * matrix.columns);
+                                matrix.drops[j].character = matrix.characters.charAt(Math.floor(Math.random() * matrix.characters.length));
+                                matrix.drops[j].speedFactor = 0.7 + Math.random() * 0.6;
+                                
+                                if (matrix.colorTheme === 'random') {
+                                    matrix.drops[j].colorHue = Math.floor(Math.random() * 360);
+                                }
+                                
+                                reactivated = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // If no inactive drops found or chose not to reactivate, create a new one
+                    if (!reactivated && matrix.drops.length < matrix.maxDrops * 1.2) {
+                        const column = Math.floor(Math.random() * matrix.columns);
+                        matrix.drops.push(createDrop(column));
+                    }
+                }
+                
+                // Performance optimization: limit the array size if it grows too large
+                if (matrix.drops.length > matrix.maxDrops * 2) {
+                    // Remove inactive drops to prevent array from growing too large
+                    matrix.drops = matrix.drops.filter(drop => drop.active);
                 }
                 
                 if (matrixEnabled) {
@@ -172,8 +396,30 @@
                 draw();
             }
             
-            // Function to toggle matrix effect
-            window.toggleMatrixEffect = function(enabled) {
+            // Function to toggle matrix effect with optional settings
+            window.toggleMatrixEffect = function(enabled, settings = {}) {
+                if (settings) {
+                    // Update matrix settings
+                    if (settings.speed !== undefined) {
+                        matrix.fallSpeed = settings.speed;
+                    }
+                    if (settings.density !== undefined) {
+                        matrix.density = settings.density;
+                        // Reinitialize drops with new density
+                        initDrops();
+                    }
+                    if (settings.color !== undefined) {
+                        matrix.colorTheme = settings.color;
+                    }
+                    if (settings.fontSize !== undefined) {
+                        // Apply new font size
+                        matrix.fontSize = settings.fontSize;
+                        // Reinitialize drops as font size affects column count
+                        resizeCanvas();
+                        initDrops();
+                    }
+                }
+                
                 if (enabled) {
                     canvas.style.display = 'block';
                     if (!matrix.animationId) {

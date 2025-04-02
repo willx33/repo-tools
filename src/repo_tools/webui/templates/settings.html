@@ -19,6 +19,42 @@
                 <label for="matrix-toggle" class="toggle-label"></label>
                 <span class="toggle-text">Enable the Matrix-style background effect</span>
             </div>
+            
+            <div id="matrix-settings" class="settings-nested" style="margin-top: 15px; padding-left: 15px; border-left: 2px solid var(--accent-color);">
+                <div class="setting-row">
+                    <label for="matrix-speed">Fall Speed:</label>
+                    <div class="slider-container">
+                        <input type="range" id="matrix-speed" min="0.01" max="0.5" step="0.01" value="0.06">
+                        <span class="slider-value" id="matrix-speed-value">Medium</span>
+                    </div>
+                </div>
+                
+                <div class="setting-row">
+                    <label for="matrix-density">Character Density:</label>
+                    <div class="slider-container">
+                        <input type="range" id="matrix-density" min="0.1" max="0.5" step="0.05" value="0.3">
+                        <span class="slider-value" id="matrix-density-value">Medium</span>
+                    </div>
+                </div>
+                
+                <div class="setting-row">
+                    <label for="matrix-font-size">Character Size:</label>
+                    <div class="slider-container">
+                        <input type="range" id="matrix-font-size" min="0.1" max="1.0" step="0.05" value="0.5">
+                        <span class="slider-value" id="matrix-font-size-value">Medium</span>
+                    </div>
+                </div>
+                
+                <div class="setting-row">
+                    <label for="matrix-color" style="padding-bottom: 10px;">Color Theme:</label>
+                    <select id="matrix-color" class="select-dark">
+                        <option value="green">Green</option>
+                        <option value="white">White</option>
+                        <option value="neon">Blue</option>
+                        <option value="random">Random</option>
+                    </select>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -44,19 +80,146 @@
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         const matrixToggle = document.getElementById('matrix-toggle');
+        const matrixSettings = document.getElementById('matrix-settings');
+        const matrixSpeedSlider = document.getElementById('matrix-speed');
+        const matrixSpeedValue = document.getElementById('matrix-speed-value');
+        const matrixDensitySlider = document.getElementById('matrix-density');
+        const matrixDensityValue = document.getElementById('matrix-density-value');
+        const matrixFontSizeSlider = document.getElementById('matrix-font-size');
+        const matrixFontSizeValue = document.getElementById('matrix-font-size-value');
+        const matrixColorSelect = document.getElementById('matrix-color');
         const clearCacheButton = document.getElementById('clear-cache-button');
         const notification = document.getElementById('notification');
         const notificationMessage = document.getElementById('notification-message');
         const notificationClose = document.querySelector('.notification-close');
         
-        // Initialize toggle based on saved preference
+        // Initialize controls based on saved preferences
         const matrixEnabled = localStorage.getItem('matrixEffectEnabled') !== 'false';
         matrixToggle.checked = matrixEnabled;
         
+        // Show/hide matrix settings based on toggle state
+        matrixSettings.style.display = matrixEnabled ? 'block' : 'none';
+        
+        // Initialize matrix settings with saved values or defaults
+        const matrixSpeed = localStorage.getItem('matrixSpeed') || '0.06';
+        const matrixDensity = localStorage.getItem('matrixDensity') || '0.3';
+        const matrixFontSize = localStorage.getItem('matrixFontSize') || '0.5';
+        const matrixColor = localStorage.getItem('matrixColor') || 'green';
+        
+        matrixSpeedSlider.value = matrixSpeed;
+        matrixDensitySlider.value = matrixDensity;
+        matrixFontSizeSlider.value = matrixFontSize;
+        matrixColorSelect.value = matrixColor;
+        
+        // Update speed value display
+        function updateSpeedValue() {
+            const speed = parseFloat(matrixSpeedSlider.value);
+            if (speed < 0.03) {
+                matrixSpeedValue.textContent = 'Very Slow';
+            } else if (speed < 0.08) {
+                matrixSpeedValue.textContent = 'Slow';
+            } else if (speed < 0.15) {
+                matrixSpeedValue.textContent = 'Medium';
+            } else if (speed < 0.25) {
+                matrixSpeedValue.textContent = 'Fast';
+            } else if (speed < 0.5) {
+                matrixSpeedValue.textContent = 'Very Fast';
+            } else {
+                matrixSpeedValue.textContent = 'Extreme';
+            }
+        }
+        
+        // Update density value display
+        function updateDensityValue() {
+            const density = parseFloat(matrixDensitySlider.value);
+            if (density <= 0.1) {
+                matrixDensityValue.textContent = 'Very Sparse';
+            } else if (density <= 0.2) {
+                matrixDensityValue.textContent = 'Sparse';
+            } else if (density <= 0.3) {
+                matrixDensityValue.textContent = 'Medium';
+            } else if (density <= 0.4) {
+                matrixDensityValue.textContent = 'Dense';
+            } else {
+                matrixDensityValue.textContent = 'Very Dense';
+            }
+        }
+        
+        // Update font size value display
+        function updateFontSizeValue() {
+            const fontSize = parseFloat(matrixFontSizeSlider.value);
+            if (fontSize <= 0.2) {
+                matrixFontSizeValue.textContent = 'Tiny';
+            } else if (fontSize <= 0.4) {
+                matrixFontSizeValue.textContent = 'Small';
+            } else if (fontSize <= 0.6) {
+                matrixFontSizeValue.textContent = 'Medium';
+            } else if (fontSize <= 0.8) {
+                matrixFontSizeValue.textContent = 'Large';
+            } else {
+                matrixFontSizeValue.textContent = 'Huge';
+            }
+        }
+        
+        // Initialize value displays
+        updateSpeedValue();
+        updateDensityValue();
+        updateFontSizeValue();
+        
         // Toggle matrix effect when checkbox is changed
         matrixToggle.addEventListener('change', function() {
-            window.toggleMatrixEffect(this.checked);
+            matrixSettings.style.display = this.checked ? 'block' : 'none';
+            applyMatrixSettings();
         });
+        
+        // Apply matrix settings when sliders or select change
+        matrixSpeedSlider.addEventListener('input', function() {
+            updateSpeedValue();
+            applyMatrixSettings();
+        });
+        
+        matrixDensitySlider.addEventListener('input', function() {
+            updateDensityValue();
+            applyMatrixSettings();
+        });
+        
+        matrixFontSizeSlider.addEventListener('input', function() {
+            updateFontSizeValue();
+            applyMatrixSettings();
+        });
+        
+        matrixColorSelect.addEventListener('change', function() {
+            applyMatrixSettings();
+        });
+        
+        // Apply all matrix settings
+        function applyMatrixSettings() {
+            const enabled = matrixToggle.checked;
+            const speed = parseFloat(matrixSpeedSlider.value);
+            const density = parseFloat(matrixDensitySlider.value);
+            const fontSize = parseFloat(matrixFontSizeSlider.value);
+            const color = matrixColorSelect.value;
+            
+            // Save to localStorage
+            localStorage.setItem('matrixEffectEnabled', enabled);
+            localStorage.setItem('matrixSpeed', speed);
+            localStorage.setItem('matrixDensity', density);
+            localStorage.setItem('matrixFontSize', fontSize);
+            localStorage.setItem('matrixColor', color);
+            
+            // Apply settings to the matrix effect
+            if (window.toggleMatrixEffect) {
+                window.toggleMatrixEffect(enabled, {
+                    speed: speed,
+                    density: density,
+                    fontSize: fontSize,
+                    color: color
+                });
+            }
+        }
+        
+        // Apply settings on page load
+        applyMatrixSettings();
         
         // Clear cache button
         clearCacheButton.addEventListener('click', function() {
@@ -166,6 +329,81 @@
     .settings-description {
         color: var(--text-secondary);
         margin-bottom: 15px;
+    }
+    
+    /* Matrix Settings Styles */
+    .settings-nested {
+        margin-top: 15px;
+        transition: all 0.3s ease;
+    }
+    
+    .setting-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 15px;
+    }
+    
+    .setting-row label {
+        flex: 0 0 150px;
+        color: var(--text-secondary);
+    }
+    
+    .slider-container {
+        flex: 1;
+        display: flex;
+        align-items: center;
+    }
+    
+    .slider-value {
+        margin-left: 10px;
+        min-width: 90px;
+        color: var(--text-primary);
+        font-size: 0.9em;
+    }
+    
+    input[type="range"] {
+        -webkit-appearance: none;
+        width: 100%;
+        height: 6px;
+        background: var(--bg-tertiary);
+        border-radius: 3px;
+        outline: none;
+    }
+    
+    input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--accent-color);
+        cursor: pointer;
+    }
+    
+    input[type="range"]::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--accent-color);
+        cursor: pointer;
+        border: none;
+    }
+    
+    .select-dark {
+        background-color: var(--bg-tertiary);
+        color: var(--text-primary);
+        border: none;
+        padding: 8px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        outline: none;
+        min-width: 150px;
+        height: 36px;
+        display: inline-flex;
+        align-items: center;
+    }
+    
+    .select-dark option {
+        background-color: var(--bg-secondary);
     }
     
     /* Notification */
