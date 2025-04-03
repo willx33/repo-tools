@@ -17,14 +17,14 @@
             <div class="toggle-switch">
                 <input type="checkbox" id="matrix-toggle" class="toggle-input">
                 <label for="matrix-toggle" class="toggle-label"></label>
-                <span class="toggle-text">Enable the Matrix-style background effect</span>
+                <span class="toggle-text">Enter The Matrix</span>
             </div>
             
             <div id="matrix-settings" class="settings-nested" style="margin-top: 15px; padding-left: 15px; border-left: 2px solid var(--accent-color);">
                 <div class="setting-row">
                     <label for="matrix-speed">Fall Speed:</label>
                     <div class="slider-container">
-                        <input type="range" id="matrix-speed" min="0.01" max="0.5" step="0.01" value="0.06">
+                        <input type="range" id="matrix-speed" min="0.09" max="0.36" step="0.001" value="0.22">
                         <span class="slider-value" id="matrix-speed-value">Medium</span>
                     </div>
                 </div>
@@ -32,7 +32,7 @@
                 <div class="setting-row">
                     <label for="matrix-density">Character Density:</label>
                     <div class="slider-container">
-                        <input type="range" id="matrix-density" min="0.1" max="0.5" step="0.05" value="0.3">
+                        <input type="range" id="matrix-density" min="0.1" max="0.9" step="0.01" value="0.5">
                         <span class="slider-value" id="matrix-density-value">Medium</span>
                     </div>
                 </div>
@@ -40,7 +40,7 @@
                 <div class="setting-row">
                     <label for="matrix-font-size">Character Size:</label>
                     <div class="slider-container">
-                        <input type="range" id="matrix-font-size" min="0.1" max="1.0" step="0.05" value="0.5">
+                        <input type="range" id="matrix-font-size" min="0.25" max="1.35" step="0.01" value="0.8">
                         <span class="slider-value" id="matrix-font-size-value">Medium</span>
                     </div>
                 </div>
@@ -101,9 +101,9 @@
         matrixSettings.style.display = matrixEnabled ? 'block' : 'none';
         
         // Initialize matrix settings with saved values or defaults
-        const matrixSpeed = localStorage.getItem('matrixSpeed') || '0.06';
-        const matrixDensity = localStorage.getItem('matrixDensity') || '0.3';
-        const matrixFontSize = localStorage.getItem('matrixFontSize') || '0.5';
+        const matrixSpeed = localStorage.getItem('matrixSpeed') || '0.22';
+        const matrixDensity = localStorage.getItem('matrixDensity') || '0.5';
+        const matrixFontSize = localStorage.getItem('matrixFontSize') || '0.8';
         const matrixColor = localStorage.getItem('matrixColor') || 'green';
         
         matrixSpeedSlider.value = matrixSpeed;
@@ -114,31 +114,29 @@
         // Update speed value display
         function updateSpeedValue() {
             const speed = parseFloat(matrixSpeedSlider.value);
-            if (speed < 0.03) {
+            if (speed < 0.15) {
                 matrixSpeedValue.textContent = 'Very Slow';
-            } else if (speed < 0.08) {
+            } else if (speed < 0.20) {
                 matrixSpeedValue.textContent = 'Slow';
-            } else if (speed < 0.15) {
-                matrixSpeedValue.textContent = 'Medium';
             } else if (speed < 0.25) {
+                matrixSpeedValue.textContent = 'Medium';
+            } else if (speed < 0.31) {
                 matrixSpeedValue.textContent = 'Fast';
-            } else if (speed < 0.5) {
-                matrixSpeedValue.textContent = 'Very Fast';
             } else {
-                matrixSpeedValue.textContent = 'Extreme';
+                matrixSpeedValue.textContent = 'Very Fast';
             }
         }
         
         // Update density value display
         function updateDensityValue() {
             const density = parseFloat(matrixDensitySlider.value);
-            if (density <= 0.1) {
+            if (density <= 0.15) {
                 matrixDensityValue.textContent = 'Very Sparse';
-            } else if (density <= 0.2) {
-                matrixDensityValue.textContent = 'Sparse';
             } else if (density <= 0.3) {
+                matrixDensityValue.textContent = 'Sparse';
+            } else if (density <= 0.5) {
                 matrixDensityValue.textContent = 'Medium';
-            } else if (density <= 0.4) {
+            } else if (density <= 0.7) {
                 matrixDensityValue.textContent = 'Dense';
             } else {
                 matrixDensityValue.textContent = 'Very Dense';
@@ -148,13 +146,13 @@
         // Update font size value display
         function updateFontSizeValue() {
             const fontSize = parseFloat(matrixFontSizeSlider.value);
-            if (fontSize <= 0.2) {
+            if (fontSize <= 0.4) {
                 matrixFontSizeValue.textContent = 'Tiny';
-            } else if (fontSize <= 0.4) {
-                matrixFontSizeValue.textContent = 'Small';
             } else if (fontSize <= 0.6) {
-                matrixFontSizeValue.textContent = 'Medium';
+                matrixFontSizeValue.textContent = 'Small';
             } else if (fontSize <= 0.8) {
+                matrixFontSizeValue.textContent = 'Medium';
+            } else if (fontSize <= 1.1) {
                 matrixFontSizeValue.textContent = 'Large';
             } else {
                 matrixFontSizeValue.textContent = 'Huge';
