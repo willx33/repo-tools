@@ -272,6 +272,76 @@
     </div>
 </div>
 
+<!-- XML Parser Section -->
+<div class="workflow-step hidden" id="step-xml-parser">
+    <h3>🔧 Optional: XML Parser For Selected Repo</h3>
+    
+    <div class="summary-box">
+        <div class="summary-header" id="xml-parser-header">
+            <h4>XML Parser</h4>
+            <button class="expand-collapse-btn">Collapse ▲</button>
+        </div>
+        <div class="xml-parser-content">
+            <!-- Repository selector (only shown if multiple repos are selected) -->
+            <div id="xml-repo-select" class="form-group hidden">
+                <label for="xml-repo-dropdown">Select Repository:</label>
+                <select id="xml-repo-dropdown" class="select-dark"></select>
+            </div>
+            
+            <div id="xml-repo-details" class="repo-details">
+                <div id="xml-repo-name" class="repo-detail-item">
+                    <span class="repo-detail-label">Repository:</span>
+                    <span class="repo-detail-value">No repository selected</span>
+                </div>
+                <div id="xml-repo-path" class="repo-detail-item">
+                    <span class="repo-detail-label">Path:</span>
+                    <span class="repo-detail-value">N/A</span>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="xml-input">Paste XML content below:</label>
+                <textarea 
+                    id="xml-input" 
+                    class="xml-input" 
+                    placeholder="Paste your XML here..."
+                    rows="10"
+                    disabled
+                ></textarea>
+            </div>
+            
+            <div class="button-group">
+                <button id="parse-btn" class="btn" disabled>Preview Changes</button>
+                <button id="apply-btn" class="btn btn-primary" disabled>Apply Changes</button>
+            </div>
+            
+            <!-- Preview container -->
+            <div id="preview-container" class="summary-box hidden">
+                <div class="summary-header">
+                    <h4>Changes Preview</h4>
+                    <span id="change-count" class="count-badge">0 changes</span>
+                </div>
+                <div id="preview-list" class="file-list">
+                    <!-- Preview results will be listed here -->
+                </div>
+            </div>
+            
+            <!-- Results container -->
+            <div id="results-container" class="summary-box hidden">
+                <div class="summary-header">
+                    <h4>Results</h4>
+                    <span id="results-count" class="count-badge">
+                        <span id="success-count">0</span> of <span id="total-count">0</span> changes applied
+                    </span>
+                </div>
+                <div id="results-list" class="file-list">
+                    <!-- Results will be listed here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="notification" class="notification hidden">
     <div class="notification-content">
         <span id="notification-message"></span>
@@ -366,6 +436,26 @@
         const includePrompt = document.getElementById('include-prompt');
         const promptCopyButton = document.getElementById('prompt-copy-button');
         
+        // XML Parser elements
+        const stepXmlParser = document.getElementById('step-xml-parser');
+        const xmlParserHeader = document.getElementById('xml-parser-header');
+        const xmlParserContent = document.querySelector('.xml-parser-content');
+        const xmlParserExpandBtn = xmlParserHeader.querySelector('.expand-collapse-btn');
+        const xmlRepoSelect = document.getElementById('xml-repo-select');
+        const xmlRepoDropdown = document.getElementById('xml-repo-dropdown');
+        const xmlRepoName = document.getElementById('xml-repo-name').querySelector('.repo-detail-value');
+        const xmlRepoPath = document.getElementById('xml-repo-path').querySelector('.repo-detail-value');
+        const xmlInput = document.getElementById('xml-input');
+        const parseBtn = document.getElementById('parse-btn');
+        const applyBtn = document.getElementById('apply-btn');
+        const previewContainer = document.getElementById('preview-container');
+        const previewList = document.getElementById('preview-list');
+        const changeCountEl = document.getElementById('change-count');
+        const resultsContainer = document.getElementById('results-container');
+        const resultsListEl = document.getElementById('results-list');
+        const successCountEl = document.getElementById('success-count');
+        const totalCountEl = document.getElementById('total-count');
+        
         // File tree search
         const treeSearchInput = document.getElementById('tree-search-input');
         const treeSearchClear = document.getElementById('tree-search-clear');
@@ -393,6 +483,9 @@
         let fileTreeData = []; // Store hierarchical file tree data for included files
         let ignoredTreeData = []; // Store hierarchical file tree data for ignored files
         let totalTokenCount = 0; // Track total tokens across all repos
+        
+        // XML Parser repository selection
+        let xmlSelectedRepository = null;
         
         // Toggle ignored files section expand/collapse
         ignoredHeader.addEventListener('click', function(e) {
@@ -763,6 +856,13 @@
                         // Show both the file summary step and create prompt step
                         stepFileSummary.classList.remove('hidden');
                         stepCreatePrompt.classList.remove('hidden');
+                        
+                        // Show the XML Parser step
+                        const stepXmlParser = document.getElementById('step-xml-parser');
+                        if (stepXmlParser) {
+                            stepXmlParser.classList.remove('hidden');
+                            setupXmlParser();
+                        }
                         
                         // Save initial selection state to localStorage
                         saveSelectionState();
@@ -3485,6 +3585,9 @@
             // Hide create prompt section
             stepCreatePrompt.classList.add('hidden');
             
+            // Hide XML Parser section
+            stepXmlParser.classList.add('hidden');
+            
             // Re-enable step 2
             stepRepoSelect.classList.remove('disabled');
             
@@ -3801,6 +3904,324 @@
             pathLoading.classList.add('hidden');
             showNotification(data.message, 'error');
         });
+        
+        // XML Parser socket events
+        socket.on('xml_parse_start', (data) => {
+            previewContainer.classList.add('hidden');
+            resultsContainer.classList.add('hidden');
+            parseBtn.disabled = true;
+            parseBtn.textContent = 'Parsing...';
+        });
+        
+        socket.on('xml_parse_complete', (data) => {
+            parseBtn.disabled = false;
+            parseBtn.textContent = 'Preview Changes';
+            
+            if (data.success) {
+                renderPreview(data.changes);
+                
+                changeCountEl.textContent = `${data.changeCount} changes`;
+                previewContainer.classList.remove('hidden');
+                
+                if (data.changeCount > 0) {
+                    applyBtn.disabled = false;
+                } else {
+                    applyBtn.disabled = true;
+                }
+            }
+        });
+        
+        socket.on('xml_error', (data) => {
+            parseBtn.disabled = false;
+            parseBtn.textContent = 'Preview Changes';
+            applyBtn.disabled = true;
+            
+            showNotification(data.message, 'error');
+        });
+        
+        socket.on('xml_apply_start', (data) => {
+            applyBtn.disabled = true;
+            applyBtn.textContent = 'Applying...';
+        });
+        
+        socket.on('xml_apply_complete', (data) => {
+            applyBtn.disabled = false;
+            applyBtn.textContent = 'Apply Changes';
+            
+            if (data.success) {
+                renderResults(data.results);
+                
+                successCountEl.textContent = data.successfulChanges;
+                totalCountEl.textContent = data.totalChanges;
+                resultsContainer.classList.remove('hidden');
+                
+                if (data.successfulChanges === data.totalChanges) {
+                    showNotification('All changes applied successfully!', 'success');
+                } else {
+                    showNotification(`${data.successfulChanges} of ${data.totalChanges} changes applied successfully.`, 'warning');
+                }
+            }
+        });
+        
+        // Setup XML Parser functionality
+        function setupXmlParser() {
+            // Remove any existing event listeners to prevent duplicates
+            xmlParserHeader.removeEventListener('click', xmlParserHeaderClickHandler);
+            xmlParserExpandBtn.removeEventListener('click', xmlParserExpandBtnClickHandler);
+            
+            // Define the header click handler
+            function xmlParserHeaderClickHandler(e) {
+                // Don't toggle if clicking on the button directly (it has its own handler)
+                if (e.target.classList.contains('expand-collapse-btn')) return;
+                
+                xmlParserContent.classList.toggle('hidden');
+                updateXmlExpandButtonText();
+            }
+            
+            // Define the expand button click handler
+            function xmlParserExpandBtnClickHandler(e) {
+                e.stopPropagation(); // Prevent the header click handler from firing
+                xmlParserContent.classList.toggle('hidden');
+                updateXmlExpandButtonText();
+            }
+            
+            // Add event listeners
+            xmlParserHeader.addEventListener('click', xmlParserHeaderClickHandler);
+            xmlParserExpandBtn.addEventListener('click', xmlParserExpandBtnClickHandler);
+            
+            // Function to update button text based on current state
+            function updateXmlExpandButtonText() {
+                if (xmlParserContent.classList.contains('hidden')) {
+                    xmlParserExpandBtn.textContent = 'Expand ▼';
+                } else {
+                    xmlParserExpandBtn.textContent = 'Collapse ▲';
+                }
+            }
+            
+            // Set initial button text based on current state (not changing the state itself)
+            updateXmlExpandButtonText();
+            
+            // Reset UI elements
+            previewContainer.classList.add('hidden');
+            resultsContainer.classList.add('hidden');
+            xmlInput.value = '';
+            
+            // If we have multiple repositories, show the dropdown
+            if (selectedRepos.length > 1) {
+                xmlRepoSelect.classList.remove('hidden');
+                
+                // Populate the dropdown
+                xmlRepoDropdown.innerHTML = '';
+                xmlRepoDropdown.innerHTML = '<option value="">Select a repository</option>';
+                
+                selectedRepos.forEach(repo => {
+                    const option = document.createElement('option');
+                    option.value = repo.path;
+                    option.textContent = repo.name;
+                    xmlRepoDropdown.appendChild(option);
+                });
+                
+                // Disable the XML input and buttons until a repo is selected
+                xmlInput.disabled = true;
+                parseBtn.disabled = true;
+                applyBtn.disabled = true;
+                
+                // Update repo info
+                xmlRepoName.textContent = 'No repository selected';
+                xmlRepoPath.textContent = 'N/A';
+                
+                // Set up the change event for the dropdown
+                xmlRepoDropdown.addEventListener('change', function() {
+                    const selectedPath = this.value;
+                    if (selectedPath) {
+                        const repo = selectedRepos.find(r => r.path === selectedPath);
+                        if (repo) {
+                            selectXmlRepository(repo);
+                        }
+                    } else {
+                        // No repo selected
+                        xmlInput.disabled = true;
+                        parseBtn.disabled = true;
+                        applyBtn.disabled = true;
+                        xmlRepoName.textContent = 'No repository selected';
+                        xmlRepoPath.textContent = 'N/A';
+                        xmlSelectedRepository = null;
+                    }
+                });
+            } 
+            // If we only have one repository, select it automatically
+            else if (selectedRepos.length === 1) {
+                xmlRepoSelect.classList.add('hidden');
+                selectXmlRepository(selectedRepos[0]);
+            }
+            // If no repos are selected (shouldn't happen but just in case)
+            else {
+                xmlRepoSelect.classList.add('hidden');
+                xmlInput.disabled = true;
+                parseBtn.disabled = true;
+                applyBtn.disabled = true;
+                xmlRepoName.textContent = 'No repository selected';
+                xmlRepoPath.textContent = 'N/A';
+                xmlSelectedRepository = null;
+            }
+            
+            // Add event listeners for the parse and apply buttons
+            parseBtn.addEventListener('click', parseXML);
+            applyBtn.addEventListener('click', applyXML);
+        }
+        
+        // Select a repository for XML parsing
+        function selectXmlRepository(repo) {
+            xmlSelectedRepository = repo;
+            xmlRepoName.textContent = repo.name;
+            xmlRepoPath.textContent = repo.path;
+            xmlInput.disabled = false;
+            parseBtn.disabled = false;
+            
+            // Clear previous results
+            previewContainer.classList.add('hidden');
+            resultsContainer.classList.add('hidden');
+            xmlInput.value = '';
+            applyBtn.disabled = true;
+        }
+        
+        // Parse XML function
+        function parseXML() {
+            if (!xmlSelectedRepository) {
+                showNotification('Please select a repository first', 'warning');
+                return;
+            }
+            
+            const xml = xmlInput.value.trim();
+            if (!xml) {
+                showNotification('Please paste XML content first', 'warning');
+                return;
+            }
+            
+            // Clear previous results
+            previewContainer.classList.add('hidden');
+            resultsContainer.classList.add('hidden');
+            
+            // Emit socket event
+            socket.emit('xml_parse', { 
+                xml: xml, 
+                repoPath: xmlSelectedRepository.path 
+            });
+        }
+        
+        // Apply XML changes
+        function applyXML() {
+            if (!xmlSelectedRepository) {
+                showNotification('Please select a repository first', 'warning');
+                return;
+            }
+            
+            const xml = xmlInput.value.trim();
+            if (!xml) {
+                showNotification('Please paste XML content first', 'warning');
+                return;
+            }
+            
+            // Emit socket event
+            socket.emit('xml_apply', { 
+                xml: xml, 
+                repoPath: xmlSelectedRepository.path 
+            });
+        }
+        
+        // Render preview of XML changes
+        function renderPreview(changes) {
+            previewList.innerHTML = '';
+            
+            if (!changes || changes.length === 0) {
+                previewList.innerHTML = '<p class="no-repos">No changes detected in the XML.</p>';
+                return;
+            }
+            
+            changes.forEach(change => {
+                const changeItem = document.createElement('div');
+                changeItem.className = 'file-item';
+                
+                const header = document.createElement('div');
+                header.className = 'file-header';
+                
+                const operationBadge = document.createElement('span');
+                operationBadge.className = `badge ${change.operation.toLowerCase()}`;
+                operationBadge.textContent = change.operation;
+                operationBadge.style.marginRight = '8px';
+                
+                const path = document.createElement('span');
+                path.className = 'file-path';
+                path.textContent = change.path;
+                
+                header.appendChild(operationBadge);
+                header.appendChild(path);
+                changeItem.appendChild(header);
+                
+                // Add status message
+                const status = document.createElement('div');
+                status.className = 'file-status';
+                status.textContent = change.status;
+                changeItem.appendChild(status);
+                
+                // Add warning if present
+                if (change.warning) {
+                    const warning = document.createElement('div');
+                    warning.className = 'file-warning';
+                    warning.textContent = change.warning;
+                    changeItem.appendChild(warning);
+                }
+                
+                previewList.appendChild(changeItem);
+            });
+        }
+        
+        // Render results of XML application
+        function renderResults(results) {
+            resultsListEl.innerHTML = '';
+            
+            if (!results || results.length === 0) {
+                resultsListEl.innerHTML = '<p class="no-repos">No changes were applied.</p>';
+                return;
+            }
+            
+            results.forEach(result => {
+                const resultItem = document.createElement('div');
+                resultItem.className = `file-item ${result.success ? 'success' : 'error'}`;
+                
+                const header = document.createElement('div');
+                header.className = 'file-header';
+                
+                const statusIcon = document.createElement('span');
+                statusIcon.className = 'status-icon';
+                statusIcon.textContent = result.success ? '✅' : '❌';
+                statusIcon.style.marginRight = '8px';
+                
+                const operationBadge = document.createElement('span');
+                operationBadge.className = `badge ${result.operation.toLowerCase()}`;
+                operationBadge.textContent = result.operation;
+                operationBadge.style.marginRight = '8px';
+                
+                const path = document.createElement('span');
+                path.className = 'file-path';
+                path.textContent = result.path;
+                
+                header.appendChild(statusIcon);
+                header.appendChild(operationBadge);
+                header.appendChild(path);
+                resultItem.appendChild(header);
+                
+                // Add error message if present
+                if (result.error) {
+                    const error = document.createElement('div');
+                    error.className = 'file-error';
+                    error.textContent = result.error;
+                    resultItem.appendChild(error);
+                }
+                
+                resultsListEl.appendChild(resultItem);
+            });
+        }
         
         // Event listeners
         scanButton.addEventListener('click', scanRepositories);
@@ -5647,6 +6068,145 @@ Remove an obsolete file.
         outline: none;
         border-color: var(--accent-color);
         box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+    }
+
+    /* Add CSS style for disabled/readonly inputs */
+    .disabled-input {
+        opacity: 0.6;
+        cursor: not-allowed;
+        background-color: rgba(0, 0, 0, 0.1);
+    }
+    
+    /* XML Parser specific styles */
+    .xml-input {
+        width: 100%;
+        min-height: 150px;
+        padding: 1rem;
+        background-color: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-family: monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        resize: vertical;
+        margin-bottom: 1rem;
+    }
+    
+    .xml-input:focus {
+        outline: none;
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+    }
+    
+    .repo-details {
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    
+    .repo-detail-item {
+        display: flex;
+        margin-bottom: 0.5rem;
+    }
+    
+    .repo-detail-label {
+        font-weight: 500;
+        min-width: 100px;
+        color: var(--text-secondary);
+    }
+    
+    .repo-detail-value {
+        color: var(--text-primary);
+    }
+    
+    .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 500;
+        text-transform: uppercase;
+    }
+    
+    .badge.create {
+        background-color: #28a745;
+        color: white;
+    }
+    
+    .badge.modify, .badge.update {
+        background-color: #007bff;
+        color: white;
+    }
+    
+    .badge.delete {
+        background-color: #dc3545;
+        color: white;
+    }
+    
+    .badge.rewrite {
+        background-color: #17a2b8;
+        color: white;
+    }
+    
+    .file-item {
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .file-item.success {
+        border-left: 4px solid #28a745;
+    }
+    
+    .file-item.error {
+        border-left: 4px solid #dc3545;
+    }
+    
+    .file-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+    }
+    
+    .file-path {
+        word-break: break-all;
+    }
+    
+    .file-status, .file-warning, .file-error {
+        font-size: 14px;
+        color: var(--text-secondary);
+        margin-top: 0.25rem;
+    }
+    
+    .file-warning {
+        color: #ffc107;
+    }
+    
+    .file-error {
+        color: #dc3545;
+    }
+    
+    .no-repos {
+        padding: 1rem;
+        text-align: center;
+        color: var(--text-secondary);
+        font-style: italic;
+    }
+    
+    .status-icon {
+        font-size: 16px;
+    }
+
+    /* XML Parser section styles */
+    #step-xml-parser {
+        max-width: 800px;
+        width: auto;
+        margin: 0 auto;
+        margin-top: 30px;
     }
 </style>
 {% endblock %}
