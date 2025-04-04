@@ -70,6 +70,23 @@
     
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            // Initialize default matrix values if they don't exist in localStorage
+            if (localStorage.getItem('matrixEffectEnabled') === null) {
+                localStorage.setItem('matrixEffectEnabled', true);
+            }
+            if (localStorage.getItem('matrixSpeed') === null) {
+                localStorage.setItem('matrixSpeed', '0.22');
+            }
+            if (localStorage.getItem('matrixDensity') === null) {
+                localStorage.setItem('matrixDensity', '0.5');
+            }
+            if (localStorage.getItem('matrixFontSize') === null) {
+                localStorage.setItem('matrixFontSize', '0.8');
+            }
+            if (localStorage.getItem('matrixColor') === null) {
+                localStorage.setItem('matrixColor', 'green');
+            }
+            
             // Check local storage for matrix effect preference
             const matrixEnabled = localStorage.getItem('matrixEffectEnabled') !== 'false';
             
@@ -93,13 +110,13 @@
 
             // Matrix effect configuration - brighter and more noticeable
             const matrix = {
-                fontSize: parseFloat(localStorage.getItem('matrixFontSize') || 0.5),
+                fontSize: parseFloat(localStorage.getItem('matrixFontSize')),
                 characters: "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン",
                 drops: [],
                 columns: 0,
-                fallSpeed: localStorage.getItem('matrixSpeed') || 0.06,
-                density: localStorage.getItem('matrixDensity') || 0.3,
-                colorTheme: localStorage.getItem('matrixColor') || 'green',
+                fallSpeed: localStorage.getItem('matrixSpeed'),
+                density: localStorage.getItem('matrixDensity'),
+                colorTheme: localStorage.getItem('matrixColor'),
                 colors: {
                     green: {
                         leading: 'rgba(112, 255, 117, [opacity])',
