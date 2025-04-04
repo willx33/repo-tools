@@ -13,9 +13,13 @@
         <h3>🔍 Step 1: Select Path</h3>
         <div class="form-group">
             <label for="path-select">Choose a path to search for repositories:</label>
-            <select id="path-select" class="select-dark"></select>
+            <div class="path-input-container">
+                <select id="path-select" class="select-dark"></select>
+                <input type="text" id="path-input" class="path-input hidden" placeholder="Enter a path to search for repositories">
+            </div>
             <div class="button-group">
                 <button id="scan-button" class="btn">Scan Path for Repositories</button>
+                <button id="edit-path-button" class="btn btn-orange">Edit Path</button>
                 <button id="browse-button" class="btn btn-blue">Select from File Explorer</button>
                 <input type="file" id="directory-input" webkitdirectory directory multiple style="display: none;" />
             </div>
@@ -313,6 +317,8 @@
         // DOM elements
         const stepPathSelect = document.getElementById('step-path-select');
         const pathSelect = document.getElementById('path-select');
+        const pathInput = document.getElementById('path-input');
+        const editPathButton = document.getElementById('edit-path-button');
         const scanButton = document.getElementById('scan-button');
         const browseButton = document.getElementById('browse-button');
         const directoryInput = document.getElementById('directory-input');
@@ -474,13 +480,40 @@
         
         // Scan for repositories
         function scanRepositories() {
-            // First check if we have a custom path displayed
+            // Get the path based on current mode
             let path;
             
             if (!customPath.classList.contains('hidden')) {
                 // If we've selected a directory via the file browser, don't scan - we've already processed it
                 showNotification('Repositories have already been detected from the selected directory.', 'info');
                 return;
+            } else if (isEditMode) {
+                // If in edit mode, get path from input
+                path = pathInput.value.trim();
+                if (!path) {
+                    showNotification('Please enter a valid path', 'warning');
+                    return;
+                }
+                
+                // Exit edit mode after getting the path
+                exitEditMode();
+                
+                // Check if path exists in dropdown, if not, add it
+                let pathExists = false;
+                Array.from(pathSelect.options).forEach(option => {
+                    if (option.value === path) {
+                        option.selected = true;
+                        pathExists = true;
+                    }
+                });
+                
+                if (!pathExists) {
+                    const newOption = document.createElement('option');
+                    newOption.value = path;
+                    newOption.textContent = path;
+                    newOption.selected = true;
+                    pathSelect.appendChild(newOption);
+                }
             } else {
                 // Use the path from the dropdown
                 path = pathSelect.value;
@@ -3772,6 +3805,11 @@
         // Event listeners
         scanButton.addEventListener('click', scanRepositories);
         browseButton.addEventListener('click', () => {
+            // If in edit mode, exit
+            if (isEditMode) {
+                exitEditMode();
+            }
+            
             // Show loading indicator immediately when browse button is clicked
             pathLoading.classList.remove('hidden');
             pathLoading.querySelector('p').textContent = 'Waiting for directory selection...';
@@ -3865,6 +3903,87 @@
         
         notificationClose.addEventListener('click', () => {
             notification.classList.add('hidden');
+        });
+        
+        // Edit path functionality
+        let isEditMode = false;
+        
+        editPathButton.addEventListener('click', function() {
+            if (isEditMode) {
+                // Switch back to dropdown mode
+                exitEditMode();
+            } else {
+                // Switch to edit mode
+                enterEditMode();
+            }
+        });
+        
+        function enterEditMode() {
+            // Get current selected path
+            const currentPath = pathSelect.value;
+            
+            // Set input value to current path
+            pathInput.value = currentPath;
+            
+            // Hide select, show input
+            pathSelect.classList.add('hidden');
+            pathInput.classList.remove('hidden');
+            
+            // Update button text
+            editPathButton.textContent = 'Cancel Edit';
+            
+            // Update state
+            isEditMode = true;
+            
+            // Focus on input
+            pathInput.focus();
+        }
+        
+        function exitEditMode() {
+            // Hide input, show select
+            pathInput.classList.add('hidden');
+            pathSelect.classList.remove('hidden');
+            
+            // Update button text
+            editPathButton.textContent = 'Edit Path';
+            
+            // Update state
+            isEditMode = false;
+        }
+        
+        // Handle Enter key in path input
+        pathInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                
+                // Get entered path
+                const enteredPath = pathInput.value.trim();
+                
+                if (enteredPath) {
+                    // Check if path exists in dropdown
+                    let pathExists = false;
+                    Array.from(pathSelect.options).forEach(option => {
+                        if (option.value === enteredPath) {
+                            option.selected = true;
+                            pathExists = true;
+                        }
+                    });
+                    
+                    // If path doesn't exist in dropdown, add it
+                    if (!pathExists) {
+                        const newOption = document.createElement('option');
+                        newOption.value = enteredPath;
+                        newOption.textContent = enteredPath;
+                        newOption.selected = true;
+                        pathSelect.appendChild(newOption);
+                    }
+                    
+                    // Exit edit mode
+                    exitEditMode();
+                } else {
+                    showNotification('Please enter a valid path', 'warning');
+                }
+            }
         });
         
         // Load paths on page load
@@ -5499,6 +5618,35 @@ Remove an obsolete file.
         opacity: 0.6;
         cursor: not-allowed;
         pointer-events: none;
+    }
+
+    /* Path input container for dropdown and text input */
+    .path-input-container {
+        display: flex;
+        margin-bottom: 10px;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .path-input-container select, 
+    .path-input-container input {
+        flex: 1;
+    }
+    
+    .path-input {
+        padding: 6px 10px;
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-size: 14px;
+        width: 100%;
+    }
+    
+    .path-input:focus {
+        outline: none;
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
     }
 </style>
 {% endblock %}

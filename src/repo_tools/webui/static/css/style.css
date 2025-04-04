@@ -280,6 +280,15 @@ footer {
     background-color: #0b7dda; /* Darker shade of info-color */
 }
 
+.btn-orange {
+    background-color: #e67e22; /* Orange color */
+    color: white;
+}
+
+.btn-orange:hover {
+    background-color: #d35400; /* Darker shade of orange */
+}
+
 .btn-info {
     background-color: #17a2b8; /* Different blue for info buttons */
     color: white;
