@@ -4,12 +4,11 @@
 import os
 import re
 import logging
-from typing import List, Dict, Tuple, Optional, Any, Union
-from xml.dom import minidom
-import xml.etree.ElementTree as ET
-import html
-from pathlib import Path
+import json
 import difflib
+import xml.dom.minidom as minidom
+from xml.dom.minidom import Element
+from typing import List, Dict, Tuple, Optional, Any, Union, Set
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -170,6 +169,14 @@ def extract_content_between_delimiters(text: str) -> str:
         match = re.search(pattern, text, re.DOTALL)
         if match:
             return match.group(1).rstrip()
+    
+    # If no delimiters found but we have a non-empty content, see if we should treat the whole thing as content
+    # This handles the case where no delimiters are used but content is still provided
+    # Only do this for content tags, not search tags which need more precise matching
+    if "```" not in text and "===" not in text and "---" not in text and "<content>" in text:
+        # If this appears to be inside a content tag but without delimiters,
+        # return the entire text as content
+        return text.strip()
     
     # Original implementation as fallback
     lines = text.split('\n')
@@ -957,19 +964,8 @@ def parse_code_changes_format(xml_string: str) -> List[FileChange]:
                                     if desc_elems and desc_elems[0].firstChild:
                                         summary = desc_elems[0].firstChild.nodeValue.strip()
                                     
-                                    # Extract search pattern if present
-                                    search = None
-                                    search_elems = change_elem.getElementsByTagName('search')
-                                    if search_elems and search_elems[0].firstChild:
-                                        search_text = search_elems[0].firstChild.nodeValue
-                                        search = extract_content_between_delimiters(search_text)
-                                    
-                                    # Extract content if present
-                                    code = None
-                                    content_elems = change_elem.getElementsByTagName('content')
-                                    if content_elems and content_elems[0].firstChild:
-                                        content_text = content_elems[0].firstChild.nodeValue
-                                        code = extract_content_between_delimiters(content_text)
+                                    # Use our enhanced extract_search_and_content function to handle both search and content
+                                    search, code = extract_search_and_content(change_elem)
                                     
                                     # Create FileChange object
                                     change = FileChange(action, path, code, search, summary)
@@ -2576,6 +2572,71 @@ def validate_changes(changes: List[Dict[str, Any]]) -> Tuple[bool, List[str]]:
                 
     return is_valid, error_messages
 
+def extract_search_and_content(change_element: Element) -> Tuple[Optional[str], Optional[str]]:
+    """Extract search pattern and content from a change element.
+    
+    This function handles various formats of search and content blocks,
+    including those delimited by '===' or other markers such as '---' or '```'.
+    
+    Args:
+        change_element: The XML Element to extract from
+        
+    Returns:
+        Tuple of (search_pattern, content)
+    """
+    # Extract text content for search and content elements
+    search_elem = None
+    content_elem = None
+    search_elems = change_element.getElementsByTagName('search')
+    content_elems = change_element.getElementsByTagName('content')
+    
+    if search_elems:
+        search_elem = search_elems[0]
+    if content_elems:
+        content_elem = content_elems[0]
+    
+    search_pattern = None
+    content = None
+    
+    # Known delimiter patterns (=== is standard, but support others)
+    delimiters = ['===', '---', '```']
+    
+    # Extract search pattern if present
+    if search_elem is not None and search_elem.firstChild:
+        search_text = search_elem.firstChild.nodeValue
+        if search_text:
+            # Extract content between delimiters
+            for delimiter in delimiters:
+                if delimiter in search_text:
+                    parts = search_text.split(delimiter)
+                    if len(parts) >= 3:
+                        # Get the content between the first and second delimiter
+                        search_pattern = parts[1].strip()
+                        break
+            
+            # If no delimiter was found, use the entire content (handle no-delimiter case)
+            if search_pattern is None and search_text.strip():
+                search_pattern = search_text.strip()
+    
+    # Extract content if present
+    if content_elem is not None and content_elem.firstChild:
+        content_text = content_elem.firstChild.nodeValue
+        if content_text:
+            # Extract content between delimiters
+            for delimiter in delimiters:
+                if delimiter in content_text:
+                    parts = content_text.split(delimiter)
+                    if len(parts) >= 3:
+                        # Get the content between the first and second delimiter
+                        content = parts[1].strip()
+                        break
+            
+            # If no delimiter was found, use the entire content (handle no-delimiter case)
+            if content is None and content_text.strip():
+                content = content_text.strip()
+    
+    return search_pattern, content
+
 # Command-line interface for the XML parser
 if __name__ == '__main__':
     import argparse
@@ -3103,6 +3164,381 @@ struct User {
     var name: String
     var email: String
 }
+===
+    </content>
+  </change>
+</file>""",
+                    "expected_changes": 1
+                },
+                
+                # New test case: XML with multiple change blocks in a single file
+                {
+                    "name": "XML with multiple change blocks in a single file",
+                    "xml": """<file path="Models/User.swift" action="modify">
+  <change>
+    <description>Add email property to User struct</description>
+    <search>
+===
+struct User {
+    let id: UUID
+    var name: String
+}
+===
+    </search>
+    <content>
+===
+struct User {
+    let id: UUID
+    var name: String
+    var email: String
+}
+===
+    </content>
+  </change>
+  <change>
+    <description>Add init method to User struct</description>
+    <search>
+===
+struct User {
+    let id: UUID
+    var name: String
+    var email: String
+}
+===
+    </search>
+    <content>
+===
+struct User {
+    let id: UUID
+    var name: String
+    var email: String
+    
+    init(name: String, email: String) {
+        self.id = UUID()
+        self.name = name
+        self.email = email
+    }
+}
+===
+    </content>
+  </change>
+</file>""",
+                    "expected_changes": 2
+                },
+                
+                # New test case: XML with mixed action types in single output
+                {
+                    "name": "XML with mixed action types",
+                    "xml": """<Plan>
+Implement user authentication with email verification
+</Plan>
+
+<file path="Models/User.swift" action="modify">
+  <change>
+    <description>Add email property to User struct</description>
+    <search>
+===
+struct User {
+    let id: UUID
+    var name: String
+}
+===
+    </search>
+    <content>
+===
+struct User {
+    let id: UUID
+    var name: String
+    var email: String
+    var isVerified: Bool = false
+}
+===
+    </content>
+  </change>
+</file>
+
+<file path="Services/EmailService.swift" action="create">
+  <change>
+    <description>Create email verification service</description>
+    <content>
+===
+import Foundation
+
+class EmailService {
+    func sendVerificationEmail(to email: String, userId: UUID) -> Bool {
+        // Implementation details would go here
+        print("Sending verification email to: " + email)
+        return true
+    }
+}
+===
+    </content>
+  </change>
+</file>
+
+<file path="Models/OldUserModel.swift" action="delete">
+  <change>
+    <description>Remove deprecated user model</description>
+    <content>
+===
+===
+    </content>
+  </change>
+</file>""",
+                    "expected_changes": 3
+                },
+                
+                # New test case: XML wrapped in code blocks with backticks
+                {
+                    "name": "XML wrapped in markdown code blocks",
+                    "xml": """```xml
+<file path="Models/User.swift" action="modify">
+  <change>
+    <description>Add email property to User struct</description>
+    <search>
+===
+struct User {
+    let id: UUID
+    var name: String
+}
+===
+    </search>
+    <content>
+===
+struct User {
+    let id: UUID
+    var name: String
+    var email: String
+}
+===
+    </content>
+  </change>
+</file>
+```""",
+                    "expected_changes": 1
+                },
+                
+                # New test case: XML with different delimiter styles
+                {
+                    "name": "XML with alternative delimiters",
+                    "xml": """<file path="Models/User.swift" action="modify">
+  <change>
+    <description>Add email property to User struct</description>
+    <search>
+---
+struct User {
+    let id: UUID
+    var name: String
+}
+---
+    </search>
+    <content>
+```
+struct User {
+    let id: UUID
+    var name: String
+    var email: String
+}
+```
+    </content>
+  </change>
+</file>""",
+                    "expected_changes": 1
+                },
+                
+                # New test case: XML with HTML entities in content
+                {
+                    "name": "XML with HTML entities in content",
+                    "xml": """<file path="Views/Template.html" action="create">
+  <change>
+    <description>Create HTML template with entities</description>
+    <content>
+===
+<!DOCTYPE html>
+<html>
+<head>
+    <title>User Profile</title>
+</head>
+<body>
+    <div class="user-info">
+        <h1>&lt;Username&gt;</h1>
+        <p>Email: &lt;user@example.com&gt;</p>
+        <p>Role: &amp;Admin</p>
+    </div>
+    <script>
+        const userId = "{{userId}}";
+        if (userId &amp;&amp; userId.length > 0) {
+            console.log(`User ID: ${userId}`);
+        }
+    </script>
+</body>
+</html>
+===
+    </content>
+  </change>
+</file>""",
+                    "expected_changes": 1
+                },
+                
+                # New test case: XML with unusual formatting or whitespace
+                {
+                    "name": "XML with unusual formatting and whitespace",
+                    "xml": """
+                    
+             <file    path  =  "Models/User.swift"    action = "modify"   >
+                <change>
+           <description>Add email property to User struct with strange whitespace</description>
+                 <search>
+===
+struct User {
+    let id: UUID
+    var name: String
+}
+===
+              </search>
+                  <content>
+===
+struct User {
+    let id: UUID
+    var name: String
+    var email: String
+}
+===
+             </content>
+       </change>
+                </file>
+                
+                """,
+                    "expected_changes": 1
+                },
+                
+                # New test case: XML with format from second formatting instruction set
+                {
+                    "name": "XML with second formatting instruction style (no modify action)",
+                    "xml": """<xml_formatting_instructions>
+### Role
+- You are a **code editing assistant**
+
+### Capabilities
+- Can create new files.
+- Can rewrite entire files.
+- Can delete existing files.
+
+## Tools & Actions
+1. **create** – Create a new file if it doesn't exist.
+2. **rewrite** – Replace the entire content of an existing file.
+3. **delete** – Remove a file entirely (empty <content>).
+</xml_formatting_instructions>
+
+<Plan>
+Create user authentication system with new model and service
+</Plan>
+
+<file path="Models/User.swift" action="rewrite">
+  <change>
+    <description>Complete rewrite of User model with authentication fields</description>
+    <content>
+===
+import Foundation
+
+struct User {
+    let id: UUID
+    var username: String
+    var email: String
+    var passwordHash: String
+    var lastLogin: Date?
+    var isActive: Bool = true
+    
+    init(username: String, email: String, passwordHash: String) {
+        self.id = UUID()
+        self.username = username
+        self.email = email
+        self.passwordHash = passwordHash
+    }
+}
+===
+    </content>
+  </change>
+</file>""",
+                    "expected_changes": 1
+                },
+                
+                # New test case: XML with no delimiters at all
+                {
+                    "name": "XML with no content delimiters",
+                    "xml": """<file path="README.md" action="create">
+  <change>
+    <description>Create project README</description>
+    <content>
+# User Authentication System
+
+This project implements a simple user authentication system with the following features:
+
+- User registration
+- Email verification
+- Password reset
+- Session management
+
+## Getting Started
+
+1. Clone the repository
+2. Run `npm install`
+3. Configure environment variables
+4. Start the server with `npm start`
+    </content>
+  </change>
+</file>""",
+                    "expected_changes": 1
+                },
+                
+                # New test case: XML with nested code examples that might confuse the parser
+                {
+                    "name": "XML with nested code examples inside content",
+                    "xml": """<file path="Documentation/ApiUsage.md" action="create">
+  <change>
+    <description>Create API documentation with code examples</description>
+    <content>
+===
+# API Usage Guide
+
+## User Authentication
+
+To authenticate a user, send a POST request to `/api/auth`:
+
+```javascript
+// Example authentication code
+fetch('/api/auth', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    username: 'user@example.com',
+    password: 'securePassword123'
+  })
+})
+.then(response => response.json())
+.then(data => {
+  if (data.token) {
+    // Store the token for future API calls
+    localStorage.setItem('authToken', data.token);
+  }
+});
+```
+
+## User Registration
+
+To register a new user, use the following XML format:
+
+```xml
+<user>
+  <username>newuser</username>
+  <email>user@example.com</email>
+  <password>securePassword123</password>
+</user>
+```
+
+This should be sent as the body of a POST request to `/api/users`.
 ===
     </content>
   </change>
