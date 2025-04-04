@@ -12,11 +12,36 @@
   <div class="workflow-step" id="step-1">
     <h3>🔍 Step 1: Select Path</h3>
     <div class="form-group">
-      <label for="path-select">Select a directory to scan for repositories:</label>
+      <label for="path-select">Choose a path to search for repositories:</label>
+      <div class="path-input-container">
       <select id="path-select" class="select-dark"></select>
-      <div class="button-group">
-        <button id="scan-btn" class="btn">Scan for Repositories</button>
+        <input 
+          type="text" 
+          id="path-input" 
+          class="path-input hidden" 
+          placeholder="Enter a path to search for repositories"
+          style="padding: 8px 12px; background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 15px; width: 100%; height: 40px; flex: 1; margin-bottom: 15px"
+        >
       </div>
+      <div class="button-group">
+        <button id="scan-btn" class="btn">Scan Path for Repositories</button>
+        <button id="edit-path-button" class="btn btn-orange">Edit Path</button>
+        <button id="browse-button" class="btn btn-blue">Select from File Explorer</button>
+        <input type="file" id="directory-input" webkitdirectory directory multiple style="display: none;" />
+      </div>
+    </div>
+    <div id="custom-path" class="custom-path hidden">
+      <div class="path-header">
+        <p class="selected-path-label">Selected directory:</p>
+        <button 
+          id="clear-path-button" 
+          class="clear-path-btn" 
+          title="Clear selection"
+          style="background: none; border: none; color: #ff6b6b; font-size: 18px; font-weight: bold; cursor: pointer; padding: 0 5px; margin-left: 10px; border-radius: 50%;"
+        >×</button>
+      </div>
+      <p id="selected-path-display" class="selected-path"></p>
+      <p class="path-info">Any git repositories inside this directory will be detected and processed.</p>
     </div>
     <div id="path-loading" class="loading-indicator hidden">
       <div class="spinner"></div>
@@ -27,52 +52,26 @@
   <div class="workflow-step hidden" id="step-2">
     <h3>📋 Step 2: Select Repository</h3>
     
-    <div style="display: flex; align-items: center; gap: 10px; padding-bottom: 18px;">
+    <div class="repo-controls">
       <!-- Search Bar Container -->
-      <div style="flex: 1; position: relative;">
-        <span style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; color: var(--text-secondary);">
-          🔍
-        </span>
+      <div class="repo-search">
+        <span class="repo-search-icon">🔍</span>
         <input
           type="text"
           id="repo-search-input"
           class="repo-search-input"
           placeholder="Find a repository..."
-          style="width: 100%; padding: 4px 30px; height: 30px; border-radius: 4px; background-color: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: var(--text-primary); font-size: 14px; line-height: 1; margin: 0; vertical-align: middle; box-sizing: border-box;"
         >
-        <button
-          id="repo-search-clear"
-          class="repo-search-clear"
-          style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; font-size: 16px; color: var(--text-secondary); cursor: pointer;"
-        >
-          ×
-        </button>
+        <button id="repo-search-clear" class="repo-search-clear">×</button>
       </div>
       
       <!-- Sort Dropdown Container -->
-      <div style="display: flex; align-items: center;">
-        <label for="repo-sort-select" style="margin: 0; padding: 0 5px 0 0; line-height: 30px; color: var(--text-primary); font-size: 14px; display: inline-block; vertical-align: middle; height: 30px;">
-          Sort by:
-        </label>
-        <select id="repo-sort-select" class="select-dark repo-sort-select" style="
-        padding: 4px 8px;
-        height: 30px;
-        border-radius: 4px;
-        background-color: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        color: var(--text-primary);
-        cursor: pointer;
-        appearance: auto;
-        font-size: 14px;
-        line-height: 1;
-        margin: 0;
-        vertical-align: middle;
-        box-sizing: border-box;
-        width: auto;
-    ">
-      <option value="default" style="background-color: #333; color: #fff;">Default</option>
-      <option value="name-asc" style="background-color: #333; color: #fff;">Name (A-Z)</option>
-      <option value="name-desc" style="background-color: #333; color: #fff;">Name (Z-A)</option>
+      <div class="repo-sort">
+        <label for="repo-sort-select">Sort by:</label>
+        <select id="repo-sort-select" class="select-dark">
+          <option value="default">Default</option>
+          <option value="name-asc">Name (A-Z)</option>
+          <option value="name-desc">Name (Z-A)</option>
     </select>    
       </div>
     </div>    
@@ -148,502 +147,144 @@
 </div>
 {% endblock %}
 
-{% block scripts %}
-<script>
-  let repositories = [];
-  let selectedRepository = null;
-  
-  // DOM Elements
-  const step1 = document.getElementById('step-1');
-  const step2 = document.getElementById('step-2');
-  const step3 = document.getElementById('step-3');
-  
-  const pathSelect = document.getElementById('path-select');
-  const scanBtn = document.getElementById('scan-btn');
-  const pathLoading = document.getElementById('path-loading');
-  
-  const repoChecklist = document.getElementById('repo-checklist');
-  const repoLoading = document.getElementById('repo-loading');
-  const backToStep1Btn = document.getElementById('back-to-step1-btn');
-  
-  const repoNameEl = document.querySelector('#repo-name span');
-  const repoPathEl = document.querySelector('#repo-path span');
-  const xmlInput = document.getElementById('xml-input');
-  const parseBtn = document.getElementById('parse-btn');
-  const applyBtn = document.getElementById('apply-btn');
-  const backToStep2Btn = document.getElementById('back-to-step2-btn');
-  
-  const previewContainer = document.getElementById('preview-container');
-  const previewList = document.getElementById('preview-list');
-  const changeCountEl = document.getElementById('change-count');
-  
-  const resultsContainer = document.getElementById('results-container');
-  const resultsListEl = document.getElementById('results-list');
-  const successCountEl = document.getElementById('success-count');
-  const totalCountEl = document.getElementById('total-count');
-  
-  // Search and sort
-  const repoSearchInput = document.getElementById('repo-search-input');
-  const repoSearchClear = document.getElementById('repo-search-clear');
-  const repoSortSelect = document.getElementById('repo-sort-select');
-  
-  // Initialize Socket.IO
-  const socket = io();
-  
-  // Socket.IO event handlers
-  socket.on('connect', () => {
-    console.log('Connected to server');
-  });
-  
-  socket.on('scan_start', (data) => {
-    showLoading(true);
-  });
-  
-  socket.on('scan_complete', (data) => {
-    showLoading(false);
-    repositories = data.repos || [];
-    populateRepositories();
-  });
-  
-  socket.on('error', (data) => {
-    showLoading(false);
-    showNotification(data.message, 'error');
-  });
-  
-  socket.on('xml_parse_start', (data) => {
-    previewContainer.classList.add('hidden');
-    resultsContainer.classList.add('hidden');
-    parseBtn.disabled = true;
-    parseBtn.textContent = 'Parsing...';
-  });
-  
-  socket.on('xml_parse_complete', (data) => {
-    parseBtn.disabled = false;
-    parseBtn.textContent = 'Preview Changes';
-    
-    if (data.success) {
-      renderPreview(data.changes);
-      
-      changeCountEl.textContent = `${data.changeCount} changes`;
-      previewContainer.classList.remove('hidden');
-      
-      if (data.changeCount > 0) {
-        applyBtn.disabled = false;
-      } else {
-        applyBtn.disabled = true;
-      }
-    }
-  });
-  
-  socket.on('xml_error', (data) => {
-    parseBtn.disabled = false;
-    parseBtn.textContent = 'Preview Changes';
-    applyBtn.disabled = true;
-    
-    showNotification(data.message, 'error');
-  });
-  
-  socket.on('xml_apply_start', (data) => {
-    applyBtn.disabled = true;
-    applyBtn.textContent = 'Applying...';
-  });
-  
-  socket.on('xml_apply_complete', (data) => {
-    applyBtn.disabled = false;
-    applyBtn.textContent = 'Apply Changes';
-    
-    if (data.success) {
-      renderResults(data.results);
-      
-      successCountEl.textContent = data.successfulChanges;
-      totalCountEl.textContent = data.totalChanges;
-      resultsContainer.classList.remove('hidden');
-      
-      if (data.successfulChanges === data.totalChanges) {
-        showNotification('All changes applied successfully!', 'success');
-      } else {
-        showNotification(`${data.successfulChanges} of ${data.totalChanges} changes applied successfully.`, 'warning');
-      }
-    }
-  });
-  
-  // Initialize the page
-  document.addEventListener('DOMContentLoaded', () => {
-    // Initialize notification close buttons
-    document.querySelectorAll('.notification-close').forEach(btn => {
-      btn.addEventListener('click', closeNotification);
-    });
-  
-    // Fetch path options
-    fetchPaths();
-    
-    // Event listeners
-    scanBtn.addEventListener('click', scanRepositories);
-    parseBtn.addEventListener('click', parseXML);
-    applyBtn.addEventListener('click', applyXML);
-    backToStep1Btn.addEventListener('click', backToStep1);
-    backToStep2Btn.addEventListener('click', backToStep2);
-    
-    // Search and Sort
-    repoSearchInput.addEventListener('input', filterRepositories);
-    repoSearchClear.addEventListener('click', () => {
-      repoSearchInput.value = '';
-      filterRepositories();
-    });
-    repoSortSelect.addEventListener('change', sortRepositories);
-  });
-  
-  function fetchPaths() {
-    fetch('/api/paths')
-      .then(response => response.json())
-      .then(data => {
-        const paths = data.paths || [];
-        const defaultPath = data.default || '';
-        
-        // Populate path dropdown
-        pathSelect.innerHTML = '';
-        paths.forEach(path => {
-          const option = document.createElement('option');
-          option.value = path.path;
-          option.textContent = path.display;
-          pathSelect.appendChild(option);
-          
-          // Select default path
-          if (path.path === defaultPath) {
-            option.selected = true;
-          }
-        });
-      })
-      .catch(error => {
-        console.error('Error fetching paths:', error);
-        showNotification('Failed to fetch paths. Please try again.', 'error');
-      });
-  }
-  
-  function scanRepositories() {
-    // Get selected path
-    const selectedPath = pathSelect.value;
-    if (!selectedPath) {
-      showNotification('Please select a path first', 'warning');
-      return;
-    }
-    
-    // Reset containers
-    repoChecklist.innerHTML = '';
-    previewContainer.classList.add('hidden');
-    resultsContainer.classList.add('hidden');
-    
-    // Show the loading indicator
-    showLoading(true);
-    
-    // Show step 2 and hide other steps
-    step2.classList.remove('hidden');
-    step1.classList.add('hidden');
-    step3.classList.add('hidden');
-    
-    // Emit socket event
-    socket.emit('scan_repos', { path: selectedPath });
-  }
-  
-  function showLoading(show) {
-    if (show) {
-      repoLoading.classList.remove('hidden');
-      repoChecklist.classList.add('hidden');
-    } else {
-      repoLoading.classList.add('hidden');
-      repoChecklist.classList.remove('hidden');
-    }
-  }
-  
-  function populateRepositories() {
-    repoChecklist.innerHTML = '';
-    
-    if (repositories.length === 0) {
-      repoChecklist.innerHTML = '<p class="no-repos">No Git repositories found in the selected path.</p>';
-      return;
-    }
-    
-    // Sort repositories
-    sortRepositories();
-  }
-  
-  function sortRepositories() {
-    const sortBy = repoSortSelect.value;
-    
-    // Clone array to avoid modifying original
-    const sortedRepos = [...repositories];
-    
-    // Sort based on selected option
-    if (sortBy === 'name-asc') {
-      sortedRepos.sort((a, b) => a.name.localeCompare(b.name));
-    } else if (sortBy === 'name-desc') {
-      sortedRepos.sort((a, b) => b.name.localeCompare(a.name));
-    }
-    // Default just uses the order from the backend
-    
-    // Display sorted repositories
-    renderRepositories(sortedRepos);
-  }
-  
-  function filterRepositories() {
-    const searchTerm = repoSearchInput.value.toLowerCase().trim();
-    
-    if (!searchTerm) {
-      // If no search term, show all repositories (sorted)
-      sortRepositories();
-      return;
-    }
-    
-    // Filter repositories based on search term
-    const filteredRepos = repositories.filter(repo => 
-      repo.name.toLowerCase().includes(searchTerm) || 
-      repo.path.toLowerCase().includes(searchTerm)
-    );
-    
-    renderRepositories(filteredRepos);
-  }
-  
-  function renderRepositories(repos) {
-    repoChecklist.innerHTML = '';
-    
-    if (repos.length === 0) {
-      repoChecklist.innerHTML = '<p class="no-repos">No repositories match your search.</p>';
-      return;
-    }
-    
-    repos.forEach(repo => {
-      const repoItem = document.createElement('div');
-      repoItem.className = 'repo-checkbox-item';
-      
-      const radio = document.createElement('input');
-      radio.type = 'radio';
-      radio.name = 'repository';
-      radio.id = `repo-${repo.name}`;
-      radio.value = repo.path;
-      radio.className = 'repo-radio';
-      radio.style.display = 'none';
-
-      
-      // Event listener for selecting a repository
-      radio.addEventListener('change', () => {
-        if (radio.checked) {
-          selectedRepository = repo;
-          step3.classList.remove('hidden');
-          step2.classList.add('hidden');
-          repoNameEl.textContent = repo.name;
-          repoPathEl.textContent = repo.path;
-          previewContainer.classList.add('hidden');
-          resultsContainer.classList.add('hidden');
-          applyBtn.disabled = true;
-          xmlInput.value = '';
-        }
-      });
-      
-      const label = document.createElement('label');
-      label.className = 'repo-label';
-      label.htmlFor = `repo-${repo.name}`;
-      
-      // Create the repo name display with folder emoji
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'repo-name';
-      nameSpan.innerHTML = `📂 ${repo.name}`;
-
-      // Add elements to label in correct order (only repo name)
-      label.appendChild(radio);
-      label.appendChild(nameSpan);
-
-      
-      repoItem.appendChild(label);
-      repoChecklist.appendChild(repoItem);
-    });
-  }
-  
-  function parseXML() {
-    if (!selectedRepository) {
-      showNotification('Please select a repository first', 'warning');
-      return;
-    }
-    
-    const xml = xmlInput.value.trim();
-    if (!xml) {
-      showNotification('Please paste XML content first', 'warning');
-      return;
-    }
-    
-    // Clear previous results
-    previewContainer.classList.add('hidden');
-    resultsContainer.classList.add('hidden');
-    
-    // Emit socket event
-    socket.emit('xml_parse', { 
-      xml: xml, 
-      repoPath: selectedRepository.path 
-    });
-  }
-  
-  function renderPreview(changes) {
-    previewList.innerHTML = '';
-    
-    if (!changes || changes.length === 0) {
-      previewList.innerHTML = '<p class="no-repos">No changes detected in the XML.</p>';
-      return;
-    }
-    
-    changes.forEach(change => {
-      const changeItem = document.createElement('div');
-      changeItem.className = 'file-item';
-      
-      const header = document.createElement('div');
-      header.className = 'file-header';
-      
-      const operationBadge = document.createElement('span');
-      operationBadge.className = `badge ${change.operation.toLowerCase()}`;
-      operationBadge.textContent = change.operation;
-      operationBadge.style.marginRight = '8px';
-      
-      const path = document.createElement('span');
-      path.className = 'file-path';
-      path.textContent = change.path;
-      
-      header.appendChild(operationBadge);
-      header.appendChild(path);
-      changeItem.appendChild(header);
-      
-      // Add status message
-      const status = document.createElement('div');
-      status.className = 'file-status';
-      status.textContent = change.status;
-      changeItem.appendChild(status);
-      
-      // Add warning if present
-      if (change.warning) {
-        const warning = document.createElement('div');
-        warning.className = 'file-warning';
-        warning.textContent = change.warning;
-        changeItem.appendChild(warning);
-      }
-      
-      previewList.appendChild(changeItem);
-    });
-  }
-  
-  function applyXML() {
-    if (!selectedRepository) {
-      showNotification('Please select a repository first', 'warning');
-      return;
-    }
-    
-    const xml = xmlInput.value.trim();
-    if (!xml) {
-      showNotification('Please paste XML content first', 'warning');
-      return;
-    }
-    
-    // Emit socket event
-    socket.emit('xml_apply', { 
-      xml: xml, 
-      repoPath: selectedRepository.path 
-    });
-  }
-  
-  function renderResults(results) {
-    resultsListEl.innerHTML = '';
-    
-    if (!results || results.length === 0) {
-      resultsListEl.innerHTML = '<p class="no-repos">No changes were applied.</p>';
-      return;
-    }
-    
-    results.forEach(result => {
-      const resultItem = document.createElement('div');
-      resultItem.className = `file-item ${result.success ? 'success' : 'error'}`;
-      
-      const header = document.createElement('div');
-      header.className = 'file-header';
-      
-      const statusIcon = document.createElement('span');
-      statusIcon.className = 'status-icon';
-      statusIcon.textContent = result.success ? '✅' : '❌';
-      statusIcon.style.marginRight = '8px';
-      
-      const operationBadge = document.createElement('span');
-      operationBadge.className = `badge ${result.operation.toLowerCase()}`;
-      operationBadge.textContent = result.operation;
-      operationBadge.style.marginRight = '8px';
-      
-      const path = document.createElement('span');
-      path.className = 'file-path';
-      path.textContent = result.path;
-      
-      header.appendChild(statusIcon);
-      header.appendChild(operationBadge);
-      header.appendChild(path);
-      resultItem.appendChild(header);
-      
-      // Add error message if present
-      if (result.error) {
-        const error = document.createElement('div');
-        error.className = 'file-error';
-        error.textContent = result.error;
-        resultItem.appendChild(error);
-      }
-      
-      resultsListEl.appendChild(resultItem);
-    });
-  }
-  
-  function backToStep1() {
-    step1.classList.remove('hidden');
-    step2.classList.add('hidden');
-    step3.classList.add('hidden');
-  }
-  
-  function backToStep2() {
-    step2.classList.remove('hidden');
-    step1.classList.add('hidden');
-    step3.classList.add('hidden');
-    
-    // Clear selected repository state
-    selectedRepository = null;
-    
-    // Clear any active radio buttons
-    const radioButtons = document.querySelectorAll('input[name="repository"]');
-    radioButtons.forEach(radio => {
-        radio.checked = false;
-    });
-    
-    // Clear XML input and results
-    xmlInput.value = '';
-    previewContainer.classList.add('hidden');
-    resultsContainer.classList.add('hidden');
-    applyBtn.disabled = true;
-  }
-  
-  function showNotification(message, type = 'info') {
-    const notification = document.getElementById('notification');
-    const notificationMessage = document.getElementById('notification-message');
-    
-    // Remove all previous classes
-    notification.className = 'notification';
-    notification.classList.add(`notification-${type}`);
-    
-    notificationMessage.textContent = message;
-    notification.classList.remove('hidden');
-    
-    // Auto-hide after 5 seconds
-    setTimeout(() => {
-      notification.classList.add('hidden');
-    }, 5000);
-  }
-  
-  function closeNotification() {
-    document.getElementById('notification').classList.add('hidden');
-  }
-</script>
-{% endblock %}
-
 {% block styles %}
 <style>
+  :root {
+    --bg-primary: #121212;
+    --bg-secondary: #1e1e1e;
+    --bg-tertiary: #2d2d2d;
+    --text-primary: #ffffff;
+    --text-secondary: #b3b3b3;
+    --accent-color: #4caf50;
+    --accent-hover: #3d8b40;
+    --error-color: #f44336;
+    --warning-color: #ff9800;
+    --info-color: #2196f3;
+    --success-color: #4caf50;
+    --border-color: #333333;
+    --shadow-color: rgba(0, 0, 0, 0.3);
+  }
+
+  /* Path input container for dropdown and text input */
+  .path-input-container {
+    display: flex;
+    margin-bottom: 16px;
+    align-items: center;
+    gap: 10px;
+  }
+  
+  .path-input-container select, 
+  .path-input-container input {
+    flex: 1;
+  }
+  
+  .path-input {
+    padding: 8px 12px !important;
+    background-color: var(--bg-secondary) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 4px !important;
+    color: var(--text-primary) !important;
+    font-size: 15px !important;
+    width: 100% !important;
+    height: 40px !important;
+    flex: 1 !important;
+  }
+  
+  .path-input:focus {
+    outline: none !important;
+    border-color: var(--accent-color) !important;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2) !important;
+  }
+
+  /* Add CSS style for disabled/readonly inputs */
+  .disabled-input {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background-color: rgba(0, 0, 0, 0.1);
+  }
+  
+  /* Path info and related styles */
+  .path-info {
+    margin-top: 8px;
+    font-size: 14px;
+    color: #68b5e1;
+    font-style: italic;
+  }
+  
+  /* Path header style */
+  .path-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  /* Clear path button */
+  .clear-path-btn {
+    background: none !important;
+    border: none !important;
+    color: #ff6b6b !important;
+    font-size: 18px !important;
+    font-weight: bold !important;
+    cursor: pointer !important;
+    padding: 0 5px !important;
+    margin-left: 10px !important;
+    border-radius: 50% !important;
+    transition: background-color 0.2s !important;
+  }
+  
+  .clear-path-btn:hover {
+    background-color: rgba(255, 107, 107, 0.2) !important;
+  }
+  
+  /* Disabled button styles */
+  .btn:disabled, .btn.disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Custom path display */
+  .custom-path {
+    background-color: rgba(255, 255, 255, 0.05);
+    padding: 12px;
+    border-radius: 4px;
+    margin-bottom: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  
+  .selected-path-label {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+  }
+  
+  .selected-path {
+    margin: 5px 0 0 0;
+    font-weight: 500;
+    color: var(--text-primary);
+    font-size: 16px;
+    word-break: break-all;
+  }
+
+  /* Button colors */
+  .btn-orange {
+    background-color: #ff9800;
+    color: white;
+  }
+  
+  .btn-orange:hover {
+    background-color: #f57c00;
+  }
+  
+  .btn-blue {
+    background-color: #2196f3;
+    color: white;
+  }
+  
+  .btn-blue:hover {
+    background-color: #1976d2;
+  }
+
   /* Aggressive override for repo-controls to force same-line display */
   .repo-controls {
     display: flex !important;
@@ -968,5 +609,831 @@
     max-height: 400px;
     overflow-y: auto;
   }
+
+  /* Select dropdown styling */
+  .select-dark {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    outline: none;
+    min-width: 150px;
+    height: 40px;
+    box-sizing: border-box;
+    font-size: 15px;
+  }
+  
+  .select-dark option {
+    background-color: var(--bg-secondary);
+  }
 </style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // State variables
+  let repositories = [];
+  let selectedRepository = null;
+  let isEditMode = false;
+  
+  // DOM Elements
+  const step1 = document.getElementById('step-1');
+  const step2 = document.getElementById('step-2');
+  const step3 = document.getElementById('step-3');
+  
+  const pathSelect = document.getElementById('path-select');
+  const pathInput = document.getElementById('path-input');
+  const scanBtn = document.getElementById('scan-btn');
+  const editPathButton = document.getElementById('edit-path-button');
+  const browseButton = document.getElementById('browse-button');
+  const directoryInput = document.getElementById('directory-input');
+  const clearPathButton = document.getElementById('clear-path-button');
+  const customPath = document.getElementById('custom-path');
+  const selectedPathDisplay = document.getElementById('selected-path-display');
+  const pathLoading = document.getElementById('path-loading');
+  
+  const repoChecklist = document.getElementById('repo-checklist');
+  const repoLoading = document.getElementById('repo-loading');
+  const backToStep1Btn = document.getElementById('back-to-step1-btn');
+  
+  const repoNameEl = document.querySelector('#repo-name span');
+  const repoPathEl = document.querySelector('#repo-path span');
+  const xmlInput = document.getElementById('xml-input');
+  const parseBtn = document.getElementById('parse-btn');
+  const applyBtn = document.getElementById('apply-btn');
+  const backToStep2Btn = document.getElementById('back-to-step2-btn');
+  
+  const previewContainer = document.getElementById('preview-container');
+  const previewList = document.getElementById('preview-list');
+  const changeCountEl = document.getElementById('change-count');
+  
+  const resultsContainer = document.getElementById('results-container');
+  const resultsListEl = document.getElementById('results-list');
+  const successCountEl = document.getElementById('success-count');
+  const totalCountEl = document.getElementById('total-count');
+  
+  // Search and sort
+  const repoSearchInput = document.getElementById('repo-search-input');
+  const repoSearchClear = document.getElementById('repo-search-clear');
+  const repoSortSelect = document.getElementById('repo-sort-select');
+  
+  // Initialize Socket.IO
+  const socket = io();
+  
+  // Socket.IO event handlers
+  socket.on('connect', () => {
+    console.log('Connected to server');
+  });
+  
+  socket.on('scan_start', (data) => {
+    showLoading(true);
+  });
+  
+  socket.on('scan_complete', (data) => {
+    showLoading(false);
+    repositories = data.repos || [];
+    populateRepositories();
+  });
+  
+  socket.on('error', (data) => {
+    showLoading(false);
+    showNotification(data.message, 'error');
+  });
+  
+  socket.on('xml_parse_start', (data) => {
+    previewContainer.classList.add('hidden');
+    resultsContainer.classList.add('hidden');
+    parseBtn.disabled = true;
+    parseBtn.textContent = 'Parsing...';
+  });
+  
+  socket.on('xml_parse_complete', (data) => {
+    parseBtn.disabled = false;
+    parseBtn.textContent = 'Preview Changes';
+    
+    if (data.success) {
+      renderPreview(data.changes);
+      
+      changeCountEl.textContent = `${data.changeCount} changes`;
+      previewContainer.classList.remove('hidden');
+      
+      if (data.changeCount > 0) {
+        applyBtn.disabled = false;
+      } else {
+        applyBtn.disabled = true;
+      }
+    }
+  });
+  
+  socket.on('xml_error', (data) => {
+    parseBtn.disabled = false;
+    parseBtn.textContent = 'Preview Changes';
+    applyBtn.disabled = true;
+    
+    showNotification(data.message, 'error');
+  });
+  
+  socket.on('xml_apply_start', (data) => {
+    applyBtn.disabled = true;
+    applyBtn.textContent = 'Applying...';
+  });
+  
+  socket.on('xml_apply_complete', (data) => {
+    applyBtn.disabled = false;
+    applyBtn.textContent = 'Apply Changes';
+    
+    if (data.success) {
+      renderResults(data.results);
+      
+      successCountEl.textContent = data.successfulChanges;
+      totalCountEl.textContent = data.totalChanges;
+      resultsContainer.classList.remove('hidden');
+      
+      if (data.successfulChanges === data.totalChanges) {
+        showNotification('All changes applied successfully!', 'success');
+      } else {
+        showNotification(`${data.successfulChanges} of ${data.totalChanges} changes applied successfully.`, 'warning');
+      }
+    }
+  });
+  
+  // Initialize the page
+  document.addEventListener('DOMContentLoaded', () => {
+    // Initialize notification close buttons
+    document.querySelectorAll('.notification-close').forEach(btn => {
+      btn.addEventListener('click', closeNotification);
+    });
+  
+    // Fetch path options
+    fetchPaths();
+    
+    // Event listeners
+    scanBtn.addEventListener('click', scanRepositories);
+    parseBtn.addEventListener('click', parseXML);
+    applyBtn.addEventListener('click', applyXML);
+    backToStep1Btn.addEventListener('click', backToStep1);
+    backToStep2Btn.addEventListener('click', backToStep2);
+    
+    // Search and Sort
+    repoSearchInput.addEventListener('input', filterRepositories);
+    repoSearchClear.addEventListener('click', () => {
+      repoSearchInput.value = '';
+      filterRepositories();
+    });
+    repoSortSelect.addEventListener('change', sortRepositories);
+    
+    // Path editing functionality
+    editPathButton.addEventListener('click', function() {
+      if (isEditMode) {
+        exitEditMode();
+      } else {
+        enterEditMode();
+      }
+    });
+    
+    // Path input enter key handler
+    pathInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        
+        // Get entered path
+        const enteredPath = pathInput.value.trim();
+        
+        if (enteredPath) {
+          // Check if path exists in dropdown
+          let pathExists = false;
+          Array.from(pathSelect.options).forEach(option => {
+            if (option.value === enteredPath) {
+              option.selected = true;
+              pathExists = true;
+            }
+          });
+          
+          // If path doesn't exist in dropdown, add it
+          if (!pathExists) {
+            const newOption = document.createElement('option');
+            newOption.value = enteredPath;
+            newOption.textContent = enteredPath;
+            newOption.selected = true;
+            pathSelect.appendChild(newOption);
+          }
+          
+          // Exit edit mode
+          exitEditMode();
+        } else {
+          showNotification('Please enter a valid path', 'warning');
+        }
+      }
+    });
+    
+    // Browse button functionality
+    browseButton.addEventListener('click', () => {
+      // If in edit mode, exit
+      if (isEditMode) {
+        exitEditMode();
+      }
+      
+      // Show loading indicator immediately when browse button is clicked
+      pathLoading.classList.remove('hidden');
+      pathLoading.querySelector('p').textContent = 'Waiting for directory selection...';
+      
+      // Set a flag to track if we're waiting for file selection
+      window.waitingForFileSelection = true;
+      
+      // Trigger the hidden file input
+      directoryInput.click();
+      
+      // Add a one-time focus event to detect when dialog is closed
+      window.addEventListener('focus', function onFocus() {
+        // Short delay to allow for handleDirectorySelection to fire first if a selection was made
+        setTimeout(() => {
+          // If we're still waiting and custom path is still hidden, user likely canceled
+          if (window.waitingForFileSelection && customPath.classList.contains('hidden')) {
+            pathLoading.classList.add('hidden');
+            window.waitingForFileSelection = false;
+          }
+        }, 300);
+        
+        // Remove this listener after it fires once
+        window.removeEventListener('focus', onFocus);
+      });
+    });
+    
+    // Directory selection handler
+    directoryInput.addEventListener('change', handleDirectorySelection);
+    
+    // Clear path button functionality
+    clearPathButton.addEventListener('click', function() {
+      // Hide custom path div
+      customPath.classList.add('hidden');
+      
+      // Reset path display
+      selectedPathDisplay.textContent = '';
+      
+      // Enable the browse and scan buttons again
+      browseButton.disabled = false;
+      scanBtn.disabled = false;
+      
+      // Clear any selected repositories that came from the file browser
+      if (step2 && !step2.classList.contains('hidden')) {
+        // If we're on step 2, go back to step 1
+        step2.classList.add('hidden');
+        step1.classList.remove('disabled');
+      }
+      
+      // Show notification
+      showNotification('Directory selection cleared', 'info');
+      
+      // Reset the file input
+      directoryInput.value = '';
+    });
+  });
+  
+  function fetchPaths() {
+    fetch('/api/paths')
+      .then(response => response.json())
+      .then(data => {
+        const paths = data.paths || [];
+        const defaultPath = data.default || '';
+        
+        // Populate path dropdown
+        pathSelect.innerHTML = '';
+        paths.forEach(path => {
+          const option = document.createElement('option');
+          option.value = path.path;
+          option.textContent = path.display;
+          pathSelect.appendChild(option);
+          
+          // Select default path
+          if (path.path === defaultPath) {
+            option.selected = true;
+          }
+        });
+      })
+      .catch(error => {
+        console.error('Error fetching paths:', error);
+        showNotification('Failed to fetch paths. Please try again.', 'error');
+      });
+  }
+  
+  function scanRepositories() {
+    // Get selected path
+    const selectedPath = pathSelect.value;
+    
+    // Check if using custom path from file browser
+    if (!customPath.classList.contains('hidden')) {
+      // If we've selected a directory via the file browser, don't scan - we've already processed it
+      showNotification('Repositories have already been detected from the selected directory.', 'info');
+      return;
+    } else if (isEditMode) {
+      // If in edit mode, get path from input
+      const path = pathInput.value.trim();
+      if (!path) {
+        showNotification('Please enter a valid path', 'warning');
+        return;
+      }
+      
+      // Exit edit mode after getting the path
+      exitEditMode();
+      
+      // Check if path exists in dropdown, if not, add it
+      let pathExists = false;
+      Array.from(pathSelect.options).forEach(option => {
+        if (option.value === path) {
+          option.selected = true;
+          pathExists = true;
+        }
+      });
+      
+      if (!pathExists) {
+        const newOption = document.createElement('option');
+        newOption.value = path;
+        newOption.textContent = path;
+        newOption.selected = true;
+        pathSelect.appendChild(newOption);
+      }
+    }
+    
+    if (!selectedPath) {
+      showNotification('Please select a path first', 'warning');
+      return;
+    }
+    
+    // Reset containers
+    repoChecklist.innerHTML = '';
+    previewContainer.classList.add('hidden');
+    resultsContainer.classList.add('hidden');
+    
+    // Show the loading indicator
+    showLoading(true);
+    
+    // Show step 2 and hide other steps
+    step2.classList.remove('hidden');
+    step1.classList.add('hidden');
+    step3.classList.add('hidden');
+    
+    // Emit socket event
+    socket.emit('scan_repos', { path: selectedPath });
+  }
+  
+  function showLoading(show) {
+    if (show) {
+      repoLoading.classList.remove('hidden');
+      repoChecklist.classList.add('hidden');
+    } else {
+      repoLoading.classList.add('hidden');
+      repoChecklist.classList.remove('hidden');
+    }
+  }
+  
+  function populateRepositories() {
+    repoChecklist.innerHTML = '';
+    
+    if (repositories.length === 0) {
+      repoChecklist.innerHTML = '<p class="no-repos">No Git repositories found in the selected path.</p>';
+      return;
+    }
+    
+    // Sort repositories
+    sortRepositories();
+  }
+  
+  function sortRepositories() {
+    const sortBy = repoSortSelect.value;
+    
+    // Clone array to avoid modifying original
+    const sortedRepos = [...repositories];
+    
+    // Sort based on selected option
+    if (sortBy === 'name-asc') {
+      sortedRepos.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortBy === 'name-desc') {
+      sortedRepos.sort((a, b) => b.name.localeCompare(a.name));
+    }
+    // Default just uses the order from the backend
+    
+    // Display sorted repositories
+    renderRepositories(sortedRepos);
+  }
+  
+  function filterRepositories() {
+    const searchTerm = repoSearchInput.value.toLowerCase().trim();
+    
+    if (!searchTerm) {
+      // If no search term, show all repositories (sorted)
+      sortRepositories();
+      return;
+    }
+    
+    
+    // Filter repositories based on search term
+    const filteredRepos = repositories.filter(repo => 
+      repo.name.toLowerCase().includes(searchTerm) || 
+      repo.path.toLowerCase().includes(searchTerm)
+    );
+    
+    renderRepositories(filteredRepos);
+  }
+  
+  function renderRepositories(repos) {
+    repoChecklist.innerHTML = '';
+    
+    if (repos.length === 0) {
+      repoChecklist.innerHTML = '<p class="no-repos">No repositories match your search.</p>';
+      return;
+    }
+    
+    repos.forEach(repo => {
+      const repoItem = document.createElement('div');
+      repoItem.className = 'repo-checkbox-item';
+      
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'repository';
+      radio.id = `repo-${repo.name}`;
+      radio.value = repo.path;
+      radio.className = 'repo-radio';
+      radio.style.display = 'none';
+
+      
+      // Event listener for selecting a repository
+      radio.addEventListener('change', () => {
+        if (radio.checked) {
+          selectedRepository = repo;
+          step3.classList.remove('hidden');
+          step2.classList.add('hidden');
+          repoNameEl.textContent = repo.name;
+          repoPathEl.textContent = repo.path;
+          previewContainer.classList.add('hidden');
+          resultsContainer.classList.add('hidden');
+          applyBtn.disabled = true;
+          xmlInput.value = '';
+        }
+      });
+      
+      const label = document.createElement('label');
+      label.className = 'repo-label';
+      label.htmlFor = `repo-${repo.name}`;
+      
+      // Create the repo name display with folder emoji
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'repo-name';
+      nameSpan.innerHTML = `📂 ${repo.name}`;
+
+      // Add elements to label in correct order (only repo name)
+      label.appendChild(radio);
+      label.appendChild(nameSpan);
+
+      
+      repoItem.appendChild(label);
+      repoChecklist.appendChild(repoItem);
+    });
+  }
+  
+  function parseXML() {
+    if (!selectedRepository) {
+      showNotification('Please select a repository first', 'warning');
+      return;
+    }
+    
+    const xml = xmlInput.value.trim();
+    if (!xml) {
+      showNotification('Please paste XML content first', 'warning');
+      return;
+    }
+    
+    // Clear previous results
+    previewContainer.classList.add('hidden');
+    resultsContainer.classList.add('hidden');
+    
+    // Emit socket event
+    socket.emit('xml_parse', { 
+      xml: xml, 
+      repoPath: selectedRepository.path 
+    });
+  }
+  
+  function renderPreview(changes) {
+    previewList.innerHTML = '';
+    
+    if (!changes || changes.length === 0) {
+      previewList.innerHTML = '<p class="no-repos">No changes detected in the XML.</p>';
+      return;
+    }
+    
+    changes.forEach(change => {
+      const changeItem = document.createElement('div');
+      changeItem.className = 'file-item';
+      
+      const header = document.createElement('div');
+      header.className = 'file-header';
+      
+      const operationBadge = document.createElement('span');
+      operationBadge.className = `badge ${change.operation.toLowerCase()}`;
+      operationBadge.textContent = change.operation;
+      operationBadge.style.marginRight = '8px';
+      
+      const path = document.createElement('span');
+      path.className = 'file-path';
+      path.textContent = change.path;
+      
+      header.appendChild(operationBadge);
+      header.appendChild(path);
+      changeItem.appendChild(header);
+      
+      // Add status message
+      const status = document.createElement('div');
+      status.className = 'file-status';
+      status.textContent = change.status;
+      changeItem.appendChild(status);
+      
+      // Add warning if present
+      if (change.warning) {
+        const warning = document.createElement('div');
+        warning.className = 'file-warning';
+        warning.textContent = change.warning;
+        changeItem.appendChild(warning);
+      }
+      
+      previewList.appendChild(changeItem);
+    });
+  }
+  
+  function applyXML() {
+    if (!selectedRepository) {
+      showNotification('Please select a repository first', 'warning');
+      return;
+    }
+    
+    const xml = xmlInput.value.trim();
+    if (!xml) {
+      showNotification('Please paste XML content first', 'warning');
+      return;
+    }
+    
+    // Emit socket event
+    socket.emit('xml_apply', { 
+      xml: xml, 
+      repoPath: selectedRepository.path 
+    });
+  }
+  
+  function renderResults(results) {
+    resultsListEl.innerHTML = '';
+    
+    if (!results || results.length === 0) {
+      resultsListEl.innerHTML = '<p class="no-repos">No changes were applied.</p>';
+      return;
+    }
+    
+    results.forEach(result => {
+      const resultItem = document.createElement('div');
+      resultItem.className = `file-item ${result.success ? 'success' : 'error'}`;
+      
+      const header = document.createElement('div');
+      header.className = 'file-header';
+      
+      const statusIcon = document.createElement('span');
+      statusIcon.className = 'status-icon';
+      statusIcon.textContent = result.success ? '✅' : '❌';
+      statusIcon.style.marginRight = '8px';
+      
+      const operationBadge = document.createElement('span');
+      operationBadge.className = `badge ${result.operation.toLowerCase()}`;
+      operationBadge.textContent = result.operation;
+      operationBadge.style.marginRight = '8px';
+      
+      const path = document.createElement('span');
+      path.className = 'file-path';
+      path.textContent = result.path;
+      
+      header.appendChild(statusIcon);
+      header.appendChild(operationBadge);
+      header.appendChild(path);
+      resultItem.appendChild(header);
+      
+      // Add error message if present
+      if (result.error) {
+        const error = document.createElement('div');
+        error.className = 'file-error';
+        error.textContent = result.error;
+        resultItem.appendChild(error);
+      }
+      
+      resultsListEl.appendChild(resultItem);
+    });
+  }
+  
+  function backToStep1() {
+    step1.classList.remove('hidden');
+    step2.classList.add('hidden');
+    step3.classList.add('hidden');
+    
+    // If step 1 was disabled (when we had selected repos), re-enable it
+    step1.classList.remove('disabled');
+    
+    // If we're using a custom path, don't reset anything as the repos are already detected
+    if (!customPath.classList.contains('hidden')) {
+      // Just show step 1 but keep the custom path visible
+      return;
+    }
+  }
+  
+  function backToStep2() {
+    step2.classList.remove('hidden');
+    step1.classList.add('hidden');
+    step3.classList.add('hidden');
+    
+    // Clear selected repository state
+    selectedRepository = null;
+    
+    // Clear any active radio buttons
+    const radioButtons = document.querySelectorAll('input[name="repository"]');
+    radioButtons.forEach(radio => {
+        radio.checked = false;
+    });
+    
+    // Clear XML input and results
+    xmlInput.value = '';
+    previewContainer.classList.add('hidden');
+    resultsContainer.classList.add('hidden');
+    applyBtn.disabled = true;
+  }
+  
+  function showNotification(message, type = 'info') {
+    const notification = document.getElementById('notification');
+    const notificationMessage = document.getElementById('notification-message');
+    
+    // Remove all previous classes
+    notification.className = 'notification';
+    notification.classList.add(`notification-${type}`);
+    
+    notificationMessage.textContent = message;
+    notification.classList.remove('hidden');
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      notification.classList.add('hidden');
+    }, 5000);
+  }
+  
+  function closeNotification() {
+    document.getElementById('notification').classList.add('hidden');
+  }
+  
+  // Enter edit mode for path input
+  function enterEditMode() {
+    // Get current selected path
+    const currentPath = pathSelect.value;
+    
+    // Set input value to current path
+    pathInput.value = currentPath;
+    
+    // Hide select, show input
+    pathSelect.classList.add('hidden');
+    pathInput.classList.remove('hidden');
+    
+    // Update button text
+    editPathButton.textContent = 'Cancel Edit';
+    
+    // Update state
+    isEditMode = true;
+    
+    // Focus on input
+    pathInput.focus();
+  }
+  
+  // Exit edit mode for path input
+  function exitEditMode() {
+    // Hide input, show select
+    pathInput.classList.add('hidden');
+    pathSelect.classList.remove('hidden');
+    
+    // Update button text
+    editPathButton.textContent = 'Edit Path';
+    
+    // Update state
+    isEditMode = false;
+  }
+  
+  // Handle directory selection via browser's file dialog
+  function handleDirectorySelection(e) {
+    // Clear waiting flag since selection has been made
+    window.waitingForFileSelection = false;
+    
+    if (e.target.files.length > 0) {
+      const files = e.target.files;
+      // Get the directory name
+      const dirName = files[0].webkitRelativePath.split('/')[0];
+      
+      // Display the selected directory name
+      selectedPathDisplay.textContent = `📂 ${dirName}`;
+      customPath.classList.remove('hidden');
+      
+      // Disable the browse and scan buttons since we already have a selection
+      browseButton.disabled = true;
+      scanBtn.disabled = true;
+      
+      // Show loading indicator
+      pathLoading.classList.remove('hidden');
+      pathLoading.querySelector('p').textContent = 'Finding repositories in selected directory...';
+      
+      // Wait a moment to allow UI to update
+      setTimeout(() => {
+        // Find repositories by looking for .git directories
+        const foundRepos = findGitReposInFiles(files);
+        
+        // Hide loading indicator
+        pathLoading.classList.add('hidden');
+        
+        if (foundRepos.length > 0) {
+          // Process the found repositories directly
+          processFoundRepositories(foundRepos, dirName);
+        } else {
+          showNotification(`No Git repositories found in "${dirName}"`, 'warning');
+        }
+      }, 100);
+    }
+  }
+  
+  // Find Git repositories in the selected files
+  function findGitReposInFiles(files) {
+    const repos = [];
+    const repoMap = new Map(); // Use a Map to track unique repos by path
+    
+    // First pass: find all .git directories to identify repositories
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const path = file.webkitRelativePath;
+      const pathParts = path.split('/');
+      
+      // Look for .git directories
+      if (path.includes('/.git/') || path.endsWith('/.git')) {
+        const gitDirIndex = pathParts.findIndex(part => part === '.git');
+        if (gitDirIndex > 0) {
+          // Get the repository path parts (all parts up to .git)
+          const repoPathParts = pathParts.slice(0, gitDirIndex);
+          const repoPath = repoPathParts.join('/');
+          const repoName = repoPathParts[repoPathParts.length - 1];
+          
+          // Only add unique repositories
+          if (!repoMap.has(repoPath)) {
+            repoMap.set(repoPath, {
+              id: `repo-${repos.length}`,
+              name: repoName,
+              path: repoPath,
+              files: new Set()
+            });
+          }
+        }
+      }
+    }
+    
+    // Second pass: add all files to their respective repositories
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const path = file.webkitRelativePath;
+      
+      // For each repository, check if this file belongs to it
+      for (const [repoPath, repo] of repoMap.entries()) {
+        if (path.startsWith(repoPath + '/')) {
+          repo.files.add(file);
+          break;
+        }
+      }
+    }
+    
+    // Convert Map to array
+    repoMap.forEach(repo => {
+      repos.push(repo);
+    });
+    
+    return repos;
+  }
+  
+  // Process found repositories
+  function processFoundRepositories(repos, dirName) {
+    // Update repositories array with found repositories
+    repositories = repos;
+    
+    // Clear previous checkboxes
+    repoChecklist.innerHTML = '';
+    
+    // Render repositories
+    populateRepositories();
+    
+    if (repositories.length > 0) {
+      // Show success message
+      showNotification(`Found ${repos.length} repositories in "${dirName}"`, 'success');
+      
+      // Disable step 1
+      step1.classList.add('disabled');
+      
+      // Show step 2
+      step2.classList.remove('hidden');
+    }
+  }
+</script>
 {% endblock %}
