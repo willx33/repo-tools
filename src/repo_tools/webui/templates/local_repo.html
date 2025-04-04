@@ -209,15 +209,17 @@
 <div class="workflow-step hidden" id="step-create-prompt">
     <h3>✍️ Optional: Create Prompt</h3>
     
-    <div class="action-buttons" style="margin-bottom: 20px;">
-        <button id="prompt-copy-button" class="btn btn-primary">📋 Copy to Clipboard</button>
-    </div>
     
     <!-- Copy Settings Panel -->
     <div class="summary-box">
         <div class="summary-header" id="copy-settings-header">
-            <h4>Copy Settings</h4>
-            <button class="expand-collapse-btn">Collapse ▲</button>
+            <div style="display: flex; align-items: center; gap: 15px; width: 100%; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <h4>Copy Settings</h4>
+                    <button id="prompt-copy-button" class="btn btn-primary" style="margin: 0; padding: 10px 22px; font-size: 14px; margin-left: 10px;" onclick="event.stopPropagation();">📋 Copy to Clipboard</button>
+                </div>
+                <button class="expand-collapse-btn">Collapse ▲</button>
+            </div>
         </div>
         <div class="copy-settings-content">
             <div class="settings-group">
