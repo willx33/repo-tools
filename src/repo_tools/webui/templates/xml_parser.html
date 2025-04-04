@@ -20,9 +20,17 @@
           id="path-input" 
           class="path-input hidden" 
           placeholder="Enter a path to search for repositories"
-          style="padding: 8px 12px; background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 15px; width: 100%; height: 40px; flex: 1; margin-bottom: 15px"
-        >
-      </div>
+                    style="padding: 0.8rem;
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-size: 14px;
+        width: 100%; outline: none;
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2); margin-bottom: 1rem"
+                  >
+                </div>
       <div class="button-group">
         <button id="scan-btn" class="btn">Scan Path for Repositories</button>
         <button id="edit-path-button" class="btn btn-orange">Edit Path</button>
@@ -55,12 +63,28 @@
     <div class="repo-controls">
       <!-- Search Bar Container -->
       <div class="repo-search">
-        <span class="repo-search-icon">🔍</span>
+        <span class="repo-search-icon" style="        position: absolute;
+        left: 10px;
+        color: var(--text-secondary);
+        font-size: 14px;
+        z-index: 1;">🔍</span>
         <input
           type="text"
           id="repo-search-input"
           class="repo-search-input"
           placeholder="Find a repository..."
+          style="width: 100%;
+        padding: 4px 30px 4px 30px;
+        height: 30px;
+        border-radius: 4px;
+        background-color: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: var(--text-primary);
+        font-size: 14px;
+        line-height: 1;
+        margin: 0;
+        vertical-align: middle;
+        box-sizing: border-box;"
         >
         <button id="repo-search-clear" class="repo-search-clear">×</button>
       </div>
@@ -179,7 +203,7 @@
   }
   
   .path-input {
-    padding: 8px 12px !important;
+    padding: 0.8rem !important;
     background-color: var(--bg-secondary) !important;
     border: 1px solid var(--border-color) !important;
     border-radius: 4px !important;
@@ -189,11 +213,26 @@
     height: 40px !important;
     flex: 1 !important;
   }
+
+  .path-input-focused {
+    padding: 0.8rem;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--accent-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 15px;
+    width: 100%;
+    height: 40px;
+    flex: 1;
+    margin-bottom: 1rem;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+    outline: none;
+  }
   
   .path-input:focus {
     outline: none !important;
     border-color: var(--accent-color) !important;
-    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2) !important;
+    box-shadow: 0 0 0 2px var(--accent-color-transparent) !important;
   }
 
   /* Add CSS style for disabled/readonly inputs */
@@ -297,16 +336,23 @@
 
   /* Increase the search bar size */
   .repo-search {
-    flex: 1 1 auto !important;
-    position: relative;
-    height: 36px;
+    width: 100%;
+    padding: 4px 30px 4px 30px;
+    height: 30px;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1;
+    margin: 0;
+    vertical-align: middle;
+    box-sizing: border-box;
   }
   
   .repo-search-icon {
     position: absolute;
     left: 10px;
-    top: 50%;
-    transform: translateY(-50%);
     color: var(--text-secondary);
     font-size: 14px;
     z-index: 1;
@@ -615,7 +661,7 @@
     background-color: var(--bg-tertiary);
     color: var(--text-primary);
     border: 1px solid var(--border-color);
-    padding: 8px 12px;
+    padding: 0.8rem;
     border-radius: 4px;
     cursor: pointer;
     outline: none;
