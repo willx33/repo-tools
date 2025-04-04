@@ -223,6 +223,15 @@
         </div>
         <div class="copy-settings-content">
             <div class="settings-group">
+                <style>
+                    .setting-item {
+                        cursor: pointer;
+                    }
+                    /* Prevent the cursor change on the actual checkbox to maintain standard behavior */
+                    .setting-item input[type="checkbox"] {
+                        cursor: default;
+                    }
+                </style>
                 <div class="setting-item">
                     <input type="checkbox" id="include-prompt" class="tree-checkbox" checked>
                     <div class="setting-info">
@@ -488,6 +497,25 @@
         
         // XML Parser repository selection
         let xmlSelectedRepository = null;
+        
+        // Make the entire setting-item row clickable for checkboxes
+        document.querySelectorAll('.setting-item').forEach(item => {
+            item.addEventListener('click', function(e) {
+                // Skip if clicking on the checkbox directly since it already handles toggling
+                if (e.target.type === 'checkbox') return;
+                
+                // Find the checkbox inside this setting-item
+                const checkbox = this.querySelector('input[type="checkbox"]');
+                if (checkbox) {
+                    // Toggle the checkbox
+                    checkbox.checked = !checkbox.checked;
+                    
+                    // Trigger the change event to ensure any event handlers attached to the checkbox run
+                    const changeEvent = new Event('change', { bubbles: true });
+                    checkbox.dispatchEvent(changeEvent);
+                }
+            });
+        });
         
         // Toggle ignored files section expand/collapse
         ignoredHeader.addEventListener('click', function(e) {
