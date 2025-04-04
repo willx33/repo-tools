@@ -60,45 +60,30 @@
   <div class="workflow-step hidden" id="step-2">
     <h3>📋 Step 2: Select Repository</h3>
     
-    <div class="repo-controls">
+    <div class="repo-controls" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; margin-bottom: 16px;">
       <!-- Search Bar Container -->
-      <div class="repo-search">
-        <span class="repo-search-icon" style="        position: absolute;
-        left: 10px;
-        color: var(--text-secondary);
-        font-size: 14px;
-        z-index: 1;">🔍</span>
+      <div class="repo-search" style="position: relative; flex: 1; display: flex; align-items: center;">
+        <span class="repo-search-icon" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 14px; z-index: 1; pointer-events: none;">🔍</span>
         <input
           type="text"
           id="repo-search-input"
           class="repo-search-input"
           placeholder="Find a repository..."
-          style="width: 100%;
-        padding: 4px 30px 4px 30px;
-        height: 30px;
-        border-radius: 4px;
-        background-color: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        color: var(--text-primary);
-        font-size: 14px;
-        line-height: 1;
-        margin: 0;
-        vertical-align: middle;
-        box-sizing: border-box;"
+          style="width: 100%; padding: 4px 30px 4px 30px; height: 36px; border-radius: 4px; background-color: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: var(--text-primary); font-size: 14px; box-sizing: border-box;"
         >
-        <button id="repo-search-clear" class="repo-search-clear">×</button>
+        <button id="repo-search-clear" class="repo-search-clear" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; z-index: 1; padding: 0; margin: 0; display: flex; align-items: center; justify-content: center; height: 24px; width: 24px;">×</button>
       </div>
       
       <!-- Sort Dropdown Container -->
-      <div class="repo-sort">
-        <label for="repo-sort-select">Sort by:</label>
-        <select id="repo-sort-select" class="select-dark">
+      <div class="repo-sort" style="flex: 0 0 auto; display: flex; align-items: center; gap: 8px; white-space: nowrap;">
+        <span style="margin: 0; padding: 0; font-size: 14px; color: var(--text-secondary); position: relative; top: 2px;">Sort by:</span>
+        <select id="repo-sort-select" class="select-dark" style="width: auto; min-width: 120px; max-width: 150px; padding: 4px 8px; height: 30px; border-radius: 4px; background-color: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: var(--text-primary); font-size: 14px; appearance: auto; box-sizing: border-box; margin: 0;">
           <option value="default">Default</option>
           <option value="name-asc">Name (A-Z)</option>
           <option value="name-desc">Name (Z-A)</option>
-    </select>    
+        </select>    
       </div>
-    </div>    
+    </div>
     
     <div class="form-group">
       <label>Select a repository:</label>
@@ -336,26 +321,21 @@
 
   /* Increase the search bar size */
   .repo-search {
-    width: 100%;
-    padding: 4px 30px 4px 30px;
-    height: 30px;
-    border-radius: 4px;
-    background-color: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: var(--text-primary);
-    font-size: 14px;
-    line-height: 1;
-    margin: 0;
-    vertical-align: middle;
-    box-sizing: border-box;
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
   }
   
   .repo-search-icon {
     position: absolute;
     left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
     color: var(--text-secondary);
     font-size: 14px;
     z-index: 1;
+    pointer-events: none;
   }
   
   .repo-search-input {
@@ -382,7 +362,13 @@
     cursor: pointer;
     font-size: 16px;
     z-index: 1;
-    height: 100%;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    width: 24px;
   }
   
   /* Force sort control to auto-size and remain compact */
@@ -390,7 +376,7 @@
     flex: 0 0 auto !important;
     display: flex !important;
     align-items: center !important;
-    gap: 5px !important;
+    gap: 8px !important;
     white-space: nowrap !important;
     height: 36px !important;
   }
@@ -404,14 +390,16 @@
   
   .repo-sort select {
     width: auto !important;
-    min-width: 80px !important;
+    min-width: 120px !important;
+    max-width: 150px !important;
     padding: 4px 8px !important;
-    height: 36px !important;
+    height: 30px !important;
     border-radius: 4px !important;
     background-color: rgba(255, 255, 255, 0.1) !important;
     border: 1px solid rgba(255, 255, 255, 0.2) !important;
     color: var(--text-primary) !important;
     font-size: 14px !important;
+    appearance: auto !important;
     box-sizing: border-box !important;
   }
   
