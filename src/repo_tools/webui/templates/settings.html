@@ -59,6 +59,23 @@
     </div>
     
     <div class="workflow-step">
+        <h3>Server Settings</h3>
+        
+        <div class="form-group">
+            <p class="settings-description">Configure server options. Changes require a server restart.</p>
+            
+            <div class="setting-row">
+                <label for="server-port">Server Port:</label>
+                <div class="input-with-button">
+                    <input type="number" id="server-port" min="1024" max="65535" value="5000" class="input-dark">
+                    <button id="save-port-button" class="btn btn-primary">Save</button>
+                </div>
+                <p class="setting-note">Valid port range: 1024-65535. Changes will take effect after manually restarting the server.</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="workflow-step">
         <h3>Cache Management</h3>
         
         <div class="form-group">
@@ -88,6 +105,8 @@
         const matrixFontSizeSlider = document.getElementById('matrix-font-size');
         const matrixFontSizeValue = document.getElementById('matrix-font-size-value');
         const matrixColorSelect = document.getElementById('matrix-color');
+        const serverPortInput = document.getElementById('server-port');
+        const savePortButton = document.getElementById('save-port-button');
         const clearCacheButton = document.getElementById('clear-cache-button');
         const notification = document.getElementById('notification');
         const notificationMessage = document.getElementById('notification-message');
@@ -110,6 +129,18 @@
         matrixDensitySlider.value = matrixDensity;
         matrixFontSizeSlider.value = matrixFontSize;
         matrixColorSelect.value = matrixColor;
+        
+        // Initialize server port with saved value or default
+        fetch('/api/server-settings')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.port) {
+                    serverPortInput.value = data.port;
+                }
+            })
+            .catch(error => {
+                console.error('Failed to fetch server settings:', error);
+            });
         
         // Update speed value display
         function updateSpeedValue() {
@@ -216,6 +247,58 @@
             }
         }
         
+        // Save server port
+        savePortButton.addEventListener('click', function() {
+            const port = parseInt(serverPortInput.value, 10);
+            
+            // Basic validation
+            if (isNaN(port) || port < 1024 || port > 65535) {
+                showNotification('Please enter a valid port number (1024-65535)', 'error');
+                return;
+            }
+            
+            // Disable button during operation
+            savePortButton.disabled = true;
+            savePortButton.textContent = 'Saving...';
+            
+            // Call the API to update port
+            fetch('/api/server-settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ port: port })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Re-enable button
+                savePortButton.disabled = false;
+                savePortButton.textContent = 'Save';
+                
+                if (data.success) {
+                    // Show success message with restart info
+                    showNotification(data.message, 'success');
+                    
+                    if (data.restart_required) {
+                        // Inform user they need to manually restart the server
+                        showNotification(`Port updated to ${port}. Please restart the server manually for changes to take effect.`, 'info');
+                    }
+                } else {
+                    // Show error message
+                    showNotification(data.message || 'Failed to update port', 'error');
+                }
+            })
+            .catch(error => {
+                // Re-enable button
+                savePortButton.disabled = false;
+                savePortButton.textContent = 'Save';
+                
+                // Show error message
+                showNotification('Error connecting to server', 'error');
+                console.error('Error:', error);
+            });
+        });
+        
         // Apply settings on page load
         applyMatrixSettings();
         
@@ -249,31 +332,32 @@
                 clearCacheButton.textContent = 'Clear Cache';
                 
                 // Show error message
-                showNotification('Error clearing cache: ' + error.message, 'error');
+                showNotification('Error connecting to server', 'error');
+                console.error('Error:', error);
             });
         });
         
-        // Show notification
+        // Show notification function
         function showNotification(message, type = 'info') {
             notificationMessage.textContent = message;
-            notification.className = 'notification';
-            notification.classList.add(`notification-${type}`);
+            notification.className = `notification ${type}`;
             notification.classList.remove('hidden');
             
-            // Auto-hide after 3 seconds
-            setTimeout(() => {
-                notification.classList.add('hidden');
-            }, 3000);
+            // Auto-hide after 5 seconds for success messages
+            if (type === 'success') {
+                setTimeout(() => {
+                    notification.classList.add('hidden');
+                }, 5000);
+            }
         }
         
-        // Handle notification close button
-        if (notificationClose) {
-            notificationClose.addEventListener('click', function() {
-                notification.classList.add('hidden');
-            });
-        }
+        // Close notification when close button is clicked
+        notificationClose.addEventListener('click', function() {
+            notification.classList.add('hidden');
+        });
     });
 </script>
+
 <style>
     /* Toggle Switch Styles */
     .toggle-switch {
@@ -404,6 +488,55 @@
         background-color: var(--bg-secondary);
     }
     
+    /* Port Input Styles */
+    .input-with-button {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 5px;
+    }
+    
+    .input-dark {
+        background-color: var(--input-bg);
+        color: var(--text-color);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 8px 12px;
+        width: 100px;
+        box-sizing: border-box;
+        height: 38px;
+    }
+    
+    #save-port-button {
+        height: 38px;
+        padding: 8px 12px;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
+    }
+    
+    /* Special styling for server settings row */
+    .workflow-step:nth-child(2) .setting-row {
+        flex-wrap: wrap;
+    }
+    
+    .workflow-step:nth-child(2) .setting-row label {
+        margin-bottom: 8px;
+        width: 100%;
+        flex: 0 0 100%;
+    }
+    
+    .workflow-step:nth-child(2) .input-with-button {
+        margin-left: 0;
+    }
+    
+    .setting-note {
+        font-size: 0.8em;
+        color: var(--secondary-text-color);
+        margin-top: 5px;
+        width: 100%;
+    }
+    
     /* Notification */
     .notification {
         position: fixed;
@@ -469,6 +602,19 @@
     .btn-warning:disabled {
         background-color: #f39c12;
         cursor: not-allowed;
+    }
+    
+    /* Notification status colors */
+    .notification.info {
+        background-color: var(--accent-color);
+    }
+    
+    .notification.success {
+        background-color: #28a745;
+    }
+    
+    .notification.error {
+        background-color: #dc3545;
     }
 </style>
 {% endblock %}

@@ -10,7 +10,7 @@ from pathlib import Path
 from flask import render_template, request, jsonify, Response, redirect, url_for
 from flask_socketio import emit
 
-from repo_tools.webui import app, socketio
+from repo_tools.webui import app, socketio, get_webui_port, update_port
 from repo_tools.utils.git import find_git_repos, get_repo_name, get_relevant_files_with_content as process_repository_files
 from repo_tools.utils.clipboard import copy_to_clipboard
 from repo_tools.utils.notifications import show_toast
@@ -44,6 +44,34 @@ def settings():
     return render_template('settings.html')
 
 # API Routes
+@app.route('/api/server-settings', methods=['GET', 'POST'])
+def server_settings():
+    """Get or update server settings."""
+    if request.method == 'GET':
+        # Return current port setting
+        return jsonify({
+            "success": True,
+            "port": get_webui_port()
+        })
+    elif request.method == 'POST':
+        # Update port setting
+        data = request.json
+        if not data or 'port' not in data:
+            return jsonify({
+                "success": False,
+                "message": "No port provided"
+            }), 400
+        
+        # Attempt to update port
+        success, message, restart_required = update_port(data['port'])
+        
+        # Return result
+        return jsonify({
+            "success": success,
+            "message": message,
+            "restart_required": restart_required
+        })
+
 @app.route('/api/paths')
 def get_paths():
     """Get paths from current directory to root."""
