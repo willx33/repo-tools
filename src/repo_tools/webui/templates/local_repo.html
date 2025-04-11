@@ -1184,6 +1184,71 @@
         
         // Build a hierarchical file tree from flat file list
         function buildFileTree(files, repoName, isIgnored = false) {
+            // Debug flag - set to true to enable path processing logs
+            const DEBUG_PATH_PROCESSING = false;
+            
+            // Debug helper function
+            function debugLog(...args) {
+                if (DEBUG_PATH_PROCESSING) {
+                    console.log(`[FileTree:${repoName}]`, ...args);
+                }
+            }
+            
+            // Helper function to normalize and clean up file paths
+            function normalizeFilePath(path, repoName) {
+                if (typeof path !== 'string') return path;
+                
+                // Standardize slashes to forward slashes
+                let normalizedPath = path.replace(/\\/g, '/');
+                
+                debugLog('Original path:', path);
+                debugLog('Normalized path:', normalizedPath);
+                
+                // Special handling for paths that include the repo name as a directory
+                // Check for the repo name as a standalone directory component
+                const repoPattern = new RegExp(`(^|/)${repoName}(/|$)`);
+                
+                if (repoPattern.test(normalizedPath)) {
+                    debugLog('Path contains repo name as directory component');
+                    
+                    // Handle the special case where a subdirectory has the same name as the repo
+                    // For example: "Dragon/Dragon/file.txt" should display subdirectory correctly
+                    
+                    // Count occurrences of repo name in the path
+                    const occurrences = (normalizedPath.match(new RegExp(`(^|/)${repoName}(/|$)`, 'g')) || []).length;
+                    debugLog('Occurrences of repo name in path:', occurrences);
+                    
+                    if (occurrences > 1) {
+                        // If there are multiple occurrences, only remove the first one (the repo name itself)
+                        // First find the index of the repo name
+                        const firstIndex = normalizedPath.search(repoPattern);
+                        if (firstIndex !== -1) {
+                            // Find the end of this match
+                            const matchEnd = normalizedPath.indexOf('/', firstIndex + 1);
+                            if (matchEnd !== -1) {
+                                // Keep everything after the first repo name match
+                                const result = normalizedPath.substring(matchEnd + 1);
+                                debugLog('Multiple occurrences found, processed path:', result);
+                                return result;
+                            }
+                        }
+                    } else {
+                        // Handle the standard case (only one occurrence of repo name)
+                        const parts = normalizedPath.split(repoName);
+                        if (parts.length > 1) {
+                            // Get the last part (everything after the repo name)
+                            const relativePart = parts[parts.length - 1];
+                            const result = relativePart.replace(/^\/+/, ''); // Remove leading slashes
+                            debugLog('Single occurrence found, processed path:', result);
+                            return result;
+                        }
+                    }
+                }
+                
+                debugLog('Returning path without repo-specific processing:', normalizedPath);
+                return normalizedPath;
+            }
+            
             const root = { 
                 name: repoName, 
                 type: 'repo', 
@@ -1206,15 +1271,8 @@
                 const tokenCount = estimateTokens(fileContent);
                 totalFileCount++; // Increment total file count for the repo
                 
-                // Extract the relative path (remove repository path prefix if present)
-                let relativePath = filePath;
-                if (typeof relativePath === 'string' && relativePath.includes(repoName)) {
-                    // Try to extract the relative path after the repository name
-                    const parts = relativePath.split(repoName);
-                    if (parts.length > 1) {
-                        relativePath = parts[1].replace(/^[\/\\]/, ''); // Remove leading slash
-                    }
-                }
+                // Apply our path normalization to get a clean relative path
+                const relativePath = normalizeFilePath(filePath, repoName);
                 
                 // Split path into segments
                 const pathSegments = relativePath.split(/[/\\]/);
@@ -1244,7 +1302,9 @@
                             isIgnored: isIgnored
                         };
                     }
-                    // Increment file count for the directory containing this file/subdir
+                    
+                    // Always increment the file count of this directory
+                    // This ensures all files are counted even if processed in a different order
                     currentLevelNode.children[segment].fileCount++;
                     
                     // Move down to the next level node
@@ -1483,12 +1543,28 @@
                         
                         switch (sortOption) {
                             case 'name-asc':
+                                // Even with name sorting, always put directories first
+                                if (a.type !== b.type) {
+                                    return a.type === 'directory' ? -1 : 1;
+                                }
                                 return a.name.localeCompare(b.name);
                             case 'name-desc':
+                                // Even with name sorting, always put directories first
+                                if (a.type !== b.type) {
+                                    return a.type === 'directory' ? -1 : 1;
+                                }
                                 return b.name.localeCompare(a.name);
                             case 'tokens-desc':
+                                // Even with token sorting, always put directories first
+                                if (a.type !== b.type) {
+                                    return a.type === 'directory' ? -1 : 1;
+                                }
                                 return b.tokenCount - a.tokenCount;
                             case 'tokens-asc':
+                                // Even with token sorting, always put directories first
+                                if (a.type !== b.type) {
+                                    return a.type === 'directory' ? -1 : 1;
+                                }
                                 return a.tokenCount - b.tokenCount;
                             case 'default':
                             default:
@@ -2046,12 +2122,42 @@
             // Add directory children (subdirectories and files)
             const sortedChildren = Object.values(directory.children)
                 .sort((a, b) => {
-                    // Directories first, then files
-                    if (a.type !== b.type) {
-                        return a.type === 'directory' ? -1 : 1;
+                    // Apply sorting based on the selected option (same as repo level)
+                    const sortOption = treeSortSelect.value;
+                    
+                    switch (sortOption) {
+                        case 'name-asc':
+                            // Even with name sorting, always put directories first
+                            if (a.type !== b.type) {
+                                return a.type === 'directory' ? -1 : 1;
+                            }
+                            return a.name.localeCompare(b.name);
+                        case 'name-desc':
+                            // Even with name sorting, always put directories first
+                            if (a.type !== b.type) {
+                                return a.type === 'directory' ? -1 : 1;
+                            }
+                            return b.name.localeCompare(a.name);
+                        case 'tokens-desc':
+                            // Even with token sorting, always put directories first
+                            if (a.type !== b.type) {
+                                return a.type === 'directory' ? -1 : 1;
+                            }
+                            return b.tokenCount - a.tokenCount;
+                        case 'tokens-asc':
+                            // Even with token sorting, always put directories first
+                            if (a.type !== b.type) {
+                                return a.type === 'directory' ? -1 : 1;
+                            }
+                            return a.tokenCount - b.tokenCount;
+                        case 'default':
+                        default:
+                            // Default sorting: directories first, then files alphabetically
+                            if (a.type !== b.type) {
+                                return a.type === 'directory' ? -1 : 1;
+                            }
+                            return a.name.localeCompare(b.name);
                     }
-                    // Alphabetical within same type
-                    return a.name.localeCompare(b.name);
                 });
             
             sortedChildren.forEach(child => {
