@@ -258,7 +258,7 @@ def normalize_line_endings(text: str) -> str:
     # Replace Windows line endings (CRLF) with Unix line endings (LF)
     return text.replace('\r\n', '\n')
 
-def parse_xml_string(xml_string: str) -> List[FileChange]:
+def parse_xml_string(xml_string: str, repo_path: Optional[str] = None) -> List[FileChange]:
     """Parse an XML string into a list of FileChange objects.
     
     This function is flexible and can handle various XML formats as long as they contain
@@ -270,6 +270,7 @@ def parse_xml_string(xml_string: str) -> List[FileChange]:
     
     Args:
         xml_string: The XML string to parse
+        repo_path: Optional path to the repository root, used for path prefix stripping.
         
     Returns:
         A list of FileChange objects representing the changes
@@ -464,6 +465,14 @@ def parse_xml_string(xml_string: str) -> List[FileChange]:
             # Log the path and operation for each change found
             for change in all_changes:
                 logger.debug(f"Found valid change: {change.operation} for {change.path}")
+                
+            # --- Start of edit: Apply path stripping if repo_path is provided ---
+            if repo_path:
+                processed_changes = []
+                for change in all_changes:
+                    processed_changes.append(_strip_redundant_prefix(change, repo_path))
+                all_changes = processed_changes
+            # --- End of edit ---
                 
             return all_changes
             
@@ -1727,7 +1736,34 @@ def validate_xml_structure(xml_string: str) -> Tuple[bool, Optional[str]]:
                 
                 i = end_comment + 3
             elif xml_string[i] == '<':
-                # Record position for this tag
+                # --- START MODIFICATION --- 
+                # Check if we are inside a content/search block
+                inside_content_tag = False
+                top_tag = None
+                if tag_stack:
+                    top_tag = tag_stack[-1]
+                    if top_tag in ['content', 'search']:
+                        inside_content_tag = True
+                
+                # If inside content/search, only look for the specific closing tag
+                if inside_content_tag:
+                    closing_tag = f"</{top_tag}>"
+                    if xml_string[i:].startswith(closing_tag):
+                        # Found the expected closing tag, proceed to parse it normally
+                        pass # Let the existing closing tag logic handle it below
+                    else:
+                        # It's just a '<' inside content, skip it and continue the loop
+                        i += 1
+                        # Update column number correctly before skipping
+                        if xml_string[i-1] != '\n':
+                             col_num +=1 
+                        else:
+                            line_num +=1
+                            col_num = 1
+                        continue # Skip the rest of the tag parsing logic for this character
+                # --- END MODIFICATION --- 
+
+                # Record position for this tag (original logic continues if not skipped)
                 positions[len(tag_stack)] = (line_num, col_num)
                 
                 if i+1 < len(xml_string) and xml_string[i+1] == '/':
@@ -1846,74 +1882,99 @@ def validate_attributes(attrs_text: str) -> bool:
             pos += 1
             
         if pos >= len(attrs_text):
-            raise ValueError(f"Attribute name not followed by '=' in '{attrs_text}'")
+            logger.warning(f"Attribute name not followed by '=' in '{attrs_text}'")
+            break
             
         name = attrs_text[name_start:pos].strip()
         if not name:
-            raise ValueError(f"Empty attribute name in '{attrs_text}'")
+            logger.warning(f"Empty attribute name in '{attrs_text}'")
+            break
             
         # Skip whitespace before =
         while pos < len(attrs_text) and attrs_text[pos].isspace():
             pos += 1
             
-        if pos >= len(attrs_text) or attrs_text[pos] != '=':
-            raise ValueError(f"Attribute '{name}' not followed by '='")
+        # Check if '=' follows the attribute name
+        if pos < len(attrs_text) and attrs_text[pos] == '=':
+            pos += 1 # Skip the =
             
-        pos += 1 # Skip the =
-        
-        # Skip whitespace after =
-        while pos < len(attrs_text) and attrs_text[pos].isspace():
-            pos += 1
-            
-        if pos >= len(attrs_text):
-            raise ValueError(f"Attribute '{name}' has no value")
-            
-        # Check for quoted or unquoted value
-        if attrs_text[pos] in '"\'':
-            # Quoted value
-            quote = attrs_text[pos]
-            pos += 1
-            value_start = pos
-            while pos < len(attrs_text) and attrs_text[pos] != quote:
+            # Skip whitespace after =
+            while pos < len(attrs_text) and attrs_text[pos].isspace():
                 pos += 1
                 
             if pos >= len(attrs_text):
-                raise ValueError(f"Unterminated quoted value for attribute '{name}'")
+                # Changed: Log warning instead of raising error
+                logger.warning(f"Attribute '{name}' in '{attrs_text}' is followed by '=' but has no value. Treating as boolean attribute.")
+                # No error, just continue to the next attribute
+                continue 
                 
-            # Skip the closing quote
-            pos += 1
-        else:
-            # Unquoted value
-            value_start = pos
-            while pos < len(attrs_text) and not attrs_text[pos].isspace():
+            # Check for quoted or unquoted value
+            if attrs_text[pos] in '"\'':
+                # Quoted value
+                quote = attrs_text[pos]
                 pos += 1
+                value_start = pos
+                while pos < len(attrs_text) and attrs_text[pos] != quote:
+                    pos += 1
+                    
+                if pos >= len(attrs_text):
+                     # Changed: Log warning instead of raising error
+                    logger.warning(f"Unterminated quoted value for attribute '{name}' in '{attrs_text}'. Skipping attribute.")
+                    # Attempt to continue parsing from here
+                    continue
+                    
+                # Skip the closing quote
+                pos += 1
+            else:
+                # Unquoted value
+                value_start = pos
+                while pos < len(attrs_text) and not attrs_text[pos].isspace() and attrs_text[pos] != '/' and attrs_text[pos] != '>':
+                    pos += 1
+                # Value ends at pos, no error even if empty
+        else:
+            # '=' not found after attribute name
+            # Changed: Log warning and skip token instead of raising error
+            if pos < len(attrs_text):
+                 logger.warning(f"Malformed attribute syntax near '{name}' in attributes '{attrs_text}'. Expected '=' after '{name}', found '{attrs_text[pos]}'. Skipping token '{name}'.")
+                 # Advance pos by 1 to skip the character that caused the issue and attempt to continue parsing
+                 pos += 1 
+            else:
+                 # Reached end of string after attribute name without '=' - treat as boolean/valueless attribute
+                 logger.warning(f"Attribute '{name}' in '{attrs_text}' appears without a value. Treating as boolean attribute.")
+                 # No need to advance pos, loop will terminate or continue correctly
     
-    return True
+    return True # Now returns True even with warnings, as we attempt recovery
 
 def parse_xml_preview(xml_string: str, repo_path: str) -> List[Dict[str, Any]]:
-    """Parse XML and generate preview of changes without applying them.
-    
-    This function is similar to parse_xml but instead of applying changes,
-    it generates a preview of what would be changed.
+    """Generate previews for changes specified in an XML string.
     
     Args:
         xml_string: XML string containing file changes
         repo_path: Path to the repository
         
     Returns:
-        List of dictionaries with preview information
+        A list of dictionaries, each representing a preview of a change
     """
+    previews = []
+    
     try:
-        # Parse the XML string to get file changes
-        parsed_changes = parse_xml_string(xml_string)
+        # Decode XML entities
+        xml_string = decode_xml_entities(xml_string)
         
+        # Parse the XML to get file changes, passing repo_path for potential stripping
+        changes = parse_xml_string(xml_string, repo_path=repo_path)
+        
+        if not changes:
+            logger.warning("No valid changes found in XML for preview")
+            return []
+            
         # Validate that we have valid FileChange objects
-        if not parsed_changes:
+        if not changes:
             raise XMLParserError("No valid changes found in XML")
         
         # Ensure all items are valid FileChange objects
         valid_changes = []
-        for i, change in enumerate(parsed_changes):
+        for i, change in enumerate(changes):
             if not isinstance(change, FileChange):
                 logger.warning(f"Skipping invalid object at position {i}: {type(change)}")
                 continue
@@ -1923,8 +1984,6 @@ def parse_xml_preview(xml_string: str, repo_path: str) -> List[Dict[str, Any]]:
             raise XMLParserError("No valid FileChange objects found after filtering")
         
         # Generate previews
-        previews = []
-        
         for change in valid_changes:
             preview = {"path": change.path, "operation": change.operation}
             
@@ -2051,8 +2110,8 @@ def parse_xml(xml_string: str, repo_path: str, lenient_search: bool = False) -> 
             logger.warning(f"XML validation warning: {error_message}")
             # Continue anyway, we'll try to parse what we can
         
-        # Parse the XML to get file changes
-        changes = parse_xml_string(xml_string)
+        # Parse the XML to get file changes, passing repo_path for potential stripping
+        changes = parse_xml_string(xml_string, repo_path=repo_path)
         
         if not changes:
             logger.error("No valid changes found in XML")
@@ -2070,8 +2129,14 @@ def parse_xml(xml_string: str, repo_path: str, lenient_search: bool = False) -> 
             logger.error("No valid FileChange objects found after filtering")
             return False
             
+        # --- Remove previously added stripping logic here ---
+        # The logic is now inside parse_xml_string
+        processed_changes = valid_changes # Use the original list from ensure_valid_file_changes
+        # --- End of removal ---
+            
         # Process changes one by one, allowing partial success
-        for change in valid_changes:
+        # Use processed_changes (which is now just valid_changes)
+        for change in processed_changes: 
             try:
                 # Log the change being processed
                 logger.info(f"Processing {change.operation} for {change.path}")
@@ -2216,31 +2281,46 @@ def find_all_matches(search_pattern: str, file_content: str) -> List[str]:
     return fuzzy_matches
 
 def create_file(repo_path: str, relative_path: str, content: Optional[str] = None) -> bool:
-    """Create a new file in the repository.
+    """Create a new file or directory in the repository.
+    
+    If content is None or empty/whitespace, creates a directory at relative_path.
+    Otherwise, creates a file with the given content.
     
     Args:
         repo_path: The root path of the repository
-        relative_path: The path to the file relative to repo_path
-        content: The content to write to the file
+        relative_path: The path to the file or directory relative to repo_path
+        content: The content to write to the file (if creating a file)
         
     Returns:
-        True if the file was created successfully, False otherwise
+        True if the file/directory was created successfully, False otherwise
     """
     try:
         # Build the full path
         full_path = os.path.join(repo_path, relative_path)
-        
-        # Create parent directories if they don't exist
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        
-        # Write the file content
-        with open(full_path, 'w', encoding='utf-8') as f:
-            f.write(content or "")
+
+        # --- Start of edit: Differentiate file/directory creation ---
+        is_directory_creation = content is None or content.strip() == ""
+
+        if is_directory_creation:
+            # Treat as directory creation request
+            os.makedirs(full_path, exist_ok=True)
+            logger.info(f"Ensured directory exists: {relative_path}")
+        else:
+            # Treat as file creation request
+            # Create parent directories if they don't exist
+            parent_dir = os.path.dirname(full_path)
+            if parent_dir:
+                 os.makedirs(parent_dir, exist_ok=True)
             
-        logger.info(f"Created file: {relative_path}")
+            # Write the file content
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(content or "") # Write empty string if content is None but wasn't caught by dir check
+            logger.info(f"Created file: {relative_path}")
+        # --- End of edit ---
+            
         return True
     except Exception as e:
-        logger.error(f"Error creating file {relative_path}: {str(e)}")
+        logger.error(f"Error creating file/directory {relative_path}: {str(e)}")
         return False
 
 def update_file(repo_path: str, relative_path: str, content: Optional[str] = None) -> bool:
@@ -2410,7 +2490,7 @@ def process_xml_changes(
     
     try:
         # Parse the XML to get changes
-        changes = parse_xml_string(xml_content)
+        changes = parse_xml_string(xml_content, repo_path)
         
         if not changes:
             result['error'] = "No valid changes found in XML"
@@ -2636,6 +2716,48 @@ def extract_search_and_content(change_element: Element) -> Tuple[Optional[str], 
                 content = content_text.strip()
     
     return search_pattern, content
+
+# Define the path stripping function globally or within the class if preferred
+def _strip_redundant_prefix(change: 'FileChange', repo_path: str) -> 'FileChange':
+    """Helper function to strip redundant repo prefix if applicable."""
+    if not change.path or not repo_path:
+        return change
+
+    repo_name = os.path.basename(repo_path)
+    if not repo_name and repo_path: # Handle edge case like '/'
+        parts = [part for part in repo_path.split(os.path.sep) if part]
+        if parts:
+            repo_name = parts[-1]
+
+    if not repo_name:
+        logger.warning(f"Could not determine repository name from path: {repo_path}. Skipping prefix stripping for {change.path}")
+        return change
+
+    # Normalize separators for reliable comparison
+    normalized_path = change.path.replace('\\', '/')
+    prefix_to_check = f"{repo_name}/"
+
+    if normalized_path.startswith(prefix_to_check):
+        # --- Start of edit: Re-introduce the os.path.isdir check ---
+        potential_subdir = os.path.join(repo_path, repo_name)
+        
+        # Check if a directory with the repo name actually exists
+        if not os.path.isdir(potential_subdir):
+            # Only strip if the subdirectory does NOT exist
+            original_path = change.path # Keep original for logging
+            stripped_path = change.path[len(prefix_to_check):].lstrip('/') # Remove prefix and leading slash if any
+            # Handle potential windows paths correctly after stripping
+            if '\\' in change.path and '/' not in stripped_path:
+                 stripped_path = stripped_path.replace('/', '\\')
+
+            logger.info(f"Stripped redundant prefix '{prefix_to_check.rstrip('/')}' from path '{original_path}'. New path: '{stripped_path}'")
+            change.path = stripped_path # Modify in place
+        else:
+            # Subdirectory exists, keep the prefix
+            logger.info(f"Path '{change.path}' starts with repo name '{repo_name}', but directory '{potential_subdir}' exists. Keeping prefix.")
+        # --- End of edit ---
+
+    return change
 
 # Command-line interface for the XML parser
 if __name__ == '__main__':
@@ -3033,6 +3155,9 @@ var email: String
     <content>
 ===
 var emailNew: String
+===
+    }
+}
 ===
     </content>
   </change>

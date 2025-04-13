@@ -33,7 +33,8 @@ from repo_tools.modules.xml_parser import (
     parse_xml_string, 
     parse_xml_preview, 
     XMLParserError,
-    validate_xml_structure
+    validate_xml_structure,
+    FileChange
 )
 
 def test_path_prefix_stripping(repo_path):
@@ -47,7 +48,7 @@ def test_path_prefix_stripping(repo_path):
     xml_with_redundant_prefix = f'<file path="{current_dir}/package.json" action="update"><content>Test content</content></file>'
     
     try:
-        changes = parse_xml_string(xml_with_redundant_prefix)
+        changes = parse_xml_string(xml_with_redundant_prefix, repo_path=repo_path)
         
         # Check if the path was properly stripped
         if changes and changes[0].path == "package.json":
@@ -78,7 +79,7 @@ def test_parser(xml_string, repo_path=None):
     
     print("\n=== PARSING RESULTS ===")
     try:
-        changes = parse_xml_string(xml_string)
+        changes = parse_xml_string(xml_string, repo_path=repo_path)
         print(f"✅ Successfully parsed {len(changes)} changes:")
         for i, change in enumerate(changes, 1):
             print(f"\n--- Change {i} ---")
