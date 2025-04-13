@@ -3724,6 +3724,13 @@
             // Hide XML Parser section
             stepXmlParser.classList.add('hidden');
             
+            // Reset the ignored files section to collapsed state
+            ignoredContent.classList.add('hidden');
+            const expandCollapseBtn = ignoredHeader.querySelector('.expand-collapse-btn');
+            if (expandCollapseBtn) {
+                expandCollapseBtn.textContent = 'Expand ▼';
+            }
+            
             // Re-enable step 2
             stepRepoSelect.classList.remove('disabled');
             
