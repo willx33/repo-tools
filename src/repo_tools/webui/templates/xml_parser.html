@@ -1167,7 +1167,29 @@
       const operationBadge = document.createElement('span');
       operationBadge.className = `badge ${change.operation.toLowerCase()}`;
       operationBadge.textContent = change.operation;
+      
+      // Apply inline styles directly
+      operationBadge.style.display = 'inline-block';
+      operationBadge.style.padding = '2px 8px';
+      operationBadge.style.borderRadius = '4px';
+      operationBadge.style.fontSize = '12px';
+      operationBadge.style.fontWeight = '500';
+      operationBadge.style.textTransform = 'uppercase';
       operationBadge.style.marginRight = '8px';
+      operationBadge.style.color = 'white'; // Default text color
+
+      // Set background color based on operation
+      switch (change.operation.toLowerCase()) {
+        case 'create':
+          operationBadge.style.backgroundColor = '#28a745'; // Solid green
+          break;
+        case 'update':
+          operationBadge.style.backgroundColor = '#007bff'; // Solid blue
+          break;
+        case 'delete':
+          operationBadge.style.backgroundColor = '#dc3545'; // Solid red
+          break;
+      }
       
       const path = document.createElement('span');
       path.className = 'file-path';
@@ -1237,7 +1259,29 @@
       const operationBadge = document.createElement('span');
       operationBadge.className = `badge ${result.operation.toLowerCase()}`;
       operationBadge.textContent = result.operation;
+
+      // Apply inline styles directly
+      operationBadge.style.display = 'inline-block';
+      operationBadge.style.padding = '2px 8px';
+      operationBadge.style.borderRadius = '4px';
+      operationBadge.style.fontSize = '12px';
+      operationBadge.style.fontWeight = '500';
+      operationBadge.style.textTransform = 'uppercase';
       operationBadge.style.marginRight = '8px';
+      operationBadge.style.color = 'white'; // Default text color
+
+      // Set background color based on operation
+      switch (result.operation.toLowerCase()) {
+        case 'create':
+          operationBadge.style.backgroundColor = '#28a745'; // Solid green
+          break;
+        case 'update':
+          operationBadge.style.backgroundColor = '#007bff'; // Solid blue
+          break;
+        case 'delete':
+          operationBadge.style.backgroundColor = '#dc3545'; // Solid red
+          break;
+      }
       
       const path = document.createElement('span');
       path.className = 'file-path';
