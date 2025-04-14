@@ -13,6 +13,15 @@
         <h3>UI Preferences</h3>
         
         <div class="form-group">
+            <label for="auto-refresh-toggle">Auto-Refresh Before Copy</label>
+            <div class="toggle-switch">
+                <input type="checkbox" id="auto-refresh-toggle" class="toggle-input" checked>
+                <label for="auto-refresh-toggle" class="toggle-label"></label>
+                <span class="toggle-text">Automatically refresh files before copying if data is older than 5 minutes</span>
+            </div>
+        </div>
+
+        <div class="form-group">
             <label for="matrix-toggle">Matrix Effect</label>
             <div class="toggle-switch">
                 <input type="checkbox" id="matrix-toggle" class="toggle-input">
@@ -96,6 +105,7 @@
 {% block scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        const autoRefreshToggle = document.getElementById('auto-refresh-toggle');
         const matrixToggle = document.getElementById('matrix-toggle');
         const matrixSettings = document.getElementById('matrix-settings');
         const matrixSpeedSlider = document.getElementById('matrix-speed');
@@ -111,6 +121,15 @@
         const notification = document.getElementById('notification');
         const notificationMessage = document.getElementById('notification-message');
         const notificationClose = document.querySelector('.notification-close');
+        
+        // Initialize auto-refresh toggle based on saved preference (default to true if not set)
+        const autoRefreshEnabled = localStorage.getItem('autoRefreshBeforeCopy') !== 'false';
+        autoRefreshToggle.checked = autoRefreshEnabled;
+        
+        // Save auto-refresh preference when changed
+        autoRefreshToggle.addEventListener('change', function() {
+            localStorage.setItem('autoRefreshBeforeCopy', this.checked);
+        });
         
         // Initialize controls based on saved preferences
         const matrixEnabled = localStorage.getItem('matrixEffectEnabled') !== 'false';
