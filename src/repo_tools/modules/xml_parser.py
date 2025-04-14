@@ -1531,12 +1531,18 @@ def apply_changes(changes_or_xml: Union[List[FileChange], str], repo_path: str, 
     if isinstance(changes_or_xml, str):
         # Parse the XML string to get changes
         try:
-            changes = parse_xml_string(changes_or_xml)
+            changes = parse_xml_string(changes_or_xml, repo_path=repo_path)
         except XMLParserError as e:
             logger.error(f"Error parsing XML: {str(e)}")
             return []
     else:
-        changes = changes_or_xml
+        # For direct list input, ensure path stripping is applied
+        changes = []
+        for change in changes_or_xml:
+            if isinstance(change, FileChange):
+                changes.append(_strip_redundant_prefix(change, repo_path))
+            else:
+                logger.warning(f"Skipping invalid object, not a FileChange: {type(change)}")
         
     # Process each change and track results
     results = []
