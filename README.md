@@ -40,7 +40,6 @@ repo-web --background
 ```
 
 ## Screnshots
----
 ![WebUI Home Page](images/ss.png)
 ---
 ![WebUI Home Page](images/lr.png)
