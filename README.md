@@ -42,3 +42,7 @@ repo-web --no-browser
 # Run in the background
 repo-web --background
 ```
+---
+![WebUI Home Page](images/ss.png)
+---
+![WebUI Home Page](images/lr.png)
