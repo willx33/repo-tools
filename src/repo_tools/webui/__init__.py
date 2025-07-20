@@ -128,7 +128,7 @@ def open_url_in_browser(url):
             console.print(f"[cyan]Please manually open {url} in your browser[/cyan]")
             return False
 
-def start_webui(debug=False, open_browser=True, block=False):
+def start_webui(debug=False, open_browser=True, block=False, host=None, port=None):
     """
     Start the WebUI server in a background thread.
     
@@ -137,11 +137,19 @@ def start_webui(debug=False, open_browser=True, block=False):
         open_browser: Whether to open the browser automatically
         block: Whether to block and wait for the server to finish (CLI mode) or 
                return control to the caller (background mode)
+        host: Host to bind to (overrides settings)
+        port: Port to bind to (overrides settings)
     """
-    global _webui_thread, _webui_running, _restart_requested
+    global _webui_thread, _webui_running, _restart_requested, _webui_host, _webui_port
     
     # Load settings to get port
     load_settings()
+    
+    # Override with command line args if provided
+    if host is not None:
+        _webui_host = host
+    if port is not None:
+        _webui_port = port
     
     if _webui_running:
         console.print("[yellow]WebUI is already running![/yellow]")

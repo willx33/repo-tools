@@ -32,6 +32,17 @@ def main() -> int:
         action='store_true',
         help='Run the web UI in background mode (non-blocking)'
     )
+    parser.add_argument(
+        '--host',
+        default='127.0.0.1',
+        help='Host to bind to (default: 127.0.0.1)'
+    )
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=5000,
+        help='Port to bind to (default: 5000)'
+    )
     
     # Parse arguments
     args = parser.parse_args()
@@ -43,7 +54,7 @@ def main() -> int:
         block = not args.background
         
         console.print("[bold green]Starting Repository Tools Web UI...[/bold green]")
-        start_webui(debug=debug, open_browser=open_browser, block=block)
+        start_webui(debug=debug, open_browser=open_browser, block=block, host=args.host, port=args.port)
         
         # If running in background mode, show URL and exit
         if not block and is_webui_running():
