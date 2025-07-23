@@ -50,7 +50,6 @@
         <div class="action-buttons">
             <button id="copy-button" class="btn btn-primary">Copy to Clipboard</button>
             <button id="refresh-button" class="btn btn-primary">Refresh Repository Files</button>
-            <button id="add-repo-button" class="btn btn-secondary">Add Another Repository</button>
             <button id="reset-button" class="btn btn-secondary">Start Over</button>
         </div>
     </div>
@@ -70,6 +69,36 @@
         // Initialize socket.io
         const socket = io();
         
+        // Send periodic heartbeat to keep connection alive and signal activity
+        let heartbeatInterval;
+        
+        function startHeartbeat() {
+            heartbeatInterval = setInterval(() => {
+                socket.emit('heartbeat', { timestamp: Date.now() });
+            }, 30000); // Every 30 seconds
+        }
+        
+        function stopHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+        }
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            stopHeartbeat();
+            socket.emit('cleanup_request', { reason: 'page_unload' });
+        });
+        
+        // Start heartbeat when connected
+        socket.on('connect', () => {
+            startHeartbeat();
+        });
+        
+        socket.on('disconnect', () => {
+            stopHeartbeat();
+        });
+        
         // DOM elements
         const githubUrl = document.getElementById('github-url');
         const cloneButton = document.getElementById('clone-button');
@@ -80,7 +109,6 @@
         const ignoredCount = document.getElementById('ignored-count');
         const copyButton = document.getElementById('copy-button');
         const refreshButton = document.getElementById('refresh-button');
-        const addRepoButton = document.getElementById('add-repo-button');
         const resetButton = document.getElementById('reset-button');
         const selectedReposSummary = document.getElementById('selected-repos-summary');
         const selectedReposCount = document.getElementById('selected-repos-count');
@@ -142,55 +170,40 @@
         }
         
         // Copy to clipboard
-        function copyToClipboard() {
+        async function copyToClipboard() {
             if (selectedRepos.length === 0) {
                 showNotification('No repositories selected to copy', 'warning');
                 return;
             }
             
-            // Create loading indicator
-            const loadingIndicator = document.createElement('div');
-            loadingIndicator.classList.add('loading-indicator');
-            loadingIndicator.innerHTML = `
-                <div class="spinner"></div>
-                <p>Copying to clipboard...</p>
-            `;
-            document.body.appendChild(loadingIndicator);
-            
-            // Use the API to copy to clipboard
-            fetch('/api/copy-to-clipboard', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ repos: selectedRepos })
-            })
-            .then(response => response.json())
-            .then(data => {
+            try {
+                // Create loading indicator
+                const loadingIndicator = document.createElement('div');
+                loadingIndicator.classList.add('loading-indicator');
+                loadingIndicator.innerHTML = `
+                    <div class="spinner"></div>
+                    <p>Copying to clipboard...</p>
+                `;
+                document.body.appendChild(loadingIndicator);
+                
+                // Use universal clipboard manager
+                const message = await ClipboardManager.copyRepositories(selectedRepos);
+                
                 // Remove loading indicator
                 loadingIndicator.remove();
                 
-                if (data.success) {
-                    showNotification(`${selectedRepos.length} ${selectedRepos.length === 1 ? 'repository' : 'repositories'} copied to clipboard!`, 'success');
-                } else {
-                    showNotification(data.message || 'Failed to copy to clipboard', 'error');
+                showNotification(message, 'success');
+                
+            } catch (error) {
+                // Remove loading indicator if it exists
+                const loadingIndicator = document.querySelector('.loading-indicator');
+                if (loadingIndicator) {
+                    loadingIndicator.remove();
                 }
-            })
-            .catch(error => {
-                // Remove loading indicator
-                loadingIndicator.remove();
                 showNotification('Error copying to clipboard: ' + error.message, 'error');
-            });
+            }
         }
         
-        // Add another repository
-        function addAnotherRepo() {
-            // Hide file summary and prepare for new repo
-            stepFileSummary.classList.add('hidden');
-            githubUrl.value = '';
-            currentRepo = null;
-            repoFiles = { included: [], ignored: [] };
-        }
         
         // Reset workflow
         function resetWorkflow() {
@@ -202,7 +215,6 @@
             selectedReposSummary.classList.add('hidden');
             selectedReposCount.textContent = "0";
             selectedReposList.innerHTML = '';
-            addRepoButton.classList.remove('hidden');
         }
         
         // Show notification
@@ -389,10 +401,7 @@
             
             // Check if we've reached the limit
             if (selectedRepos.length >= 50) {
-                addRepoButton.classList.add('hidden');
                 showNotification('Maximum of 50 repositories reached', 'info');
-            } else {
-                addRepoButton.classList.remove('hidden');
             }
             
             // Show file summary step
@@ -405,7 +414,6 @@
         cloneButton.addEventListener('click', cloneRepository);
         copyButton.addEventListener('click', copyToClipboard);
         refreshButton.addEventListener('click', refreshRepositoryFiles);
-        addRepoButton.addEventListener('click', addAnotherRepo);
         resetButton.addEventListener('click', resetWorkflow);
         notificationClose.addEventListener('click', () => {
             notification.classList.add('hidden');

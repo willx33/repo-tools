@@ -31,6 +31,9 @@
             </div>
             <p id="selected-path-display" class="selected-path"></p>
             <p class="path-info">Any git repositories inside this directory will be detected and processed.</p>
+            <div class="button-group hidden" id="proceed-to-step2">
+                <button id="continue-button" class="btn btn-primary">Continue to Repository Selection</button>
+            </div>
         </div>
         <div id="path-loading" class="loading-indicator hidden">
             <div class="spinner"></div>
@@ -592,80 +595,117 @@
             }
         });
         
-        // Load paths
-        function loadPaths() {
-            axios.get('/api/paths')
-                .then(response => {
-                    pathSelect.innerHTML = '';
-                    response.data.paths.forEach(path => {
-                        const option = document.createElement('option');
-                        option.value = path.path;
-                        option.textContent = path.display;
-                        
-                        // Set selected if this is the default path (parent directory)
-                        if (response.data.default && path.path === response.data.default) {
-                            option.selected = true;
-                        }
-                        
-                        pathSelect.appendChild(option);
-                    });
-                })
-                .catch(error => {
-                    showNotification('Error loading paths: ' + error.message, 'error');
-                });
+        // Initialize client-side file selection
+        function initializeClientFileSelection() {
+            // Hide the path dropdown and show only the browse button
+            pathSelect.style.display = 'none';
+            editPathButton.style.display = 'none';
+            scanButton.style.display = 'none';
+            
+            // Update UI for client-side selection
+            const label = document.querySelector('label[for="path-select"]');
+            if (label) {
+                label.textContent = 'Select a folder from your computer:';
+            }
+            
+            // Show browser support message
+            const support = FileSystemManager.getBrowserSupport();
+            if (support === 'none') {
+                showNotification('Directory selection is not supported in your browser. Please use Chrome or Edge.', 'error');
+                browseButton.disabled = true;
+                browseButton.textContent = 'Not Supported';
+            } else if (support === 'partial') {
+                browseButton.textContent = 'Select Folder (Limited Support)';
+            } else {
+                browseButton.textContent = 'Select Folder';
+            }
         }
         
-        // Scan for repositories
-        function scanRepositories() {
-            // Get the path based on current mode
-            let path;
+        // Process repository files client-side
+        async function processRepositoryFilesClient(repo) {
+            // Get files for this repository from the global selected files
+            const repoFiles = window.selectedDirectoryFiles.filter(fileData => 
+                fileData.path.startsWith(repo.path + '/')
+            );
             
-            if (!customPath.classList.contains('hidden')) {
-                // If we've selected a directory via the file browser, don't scan - we've already processed it
-                showNotification('Repositories have already been detected from the selected directory.', 'info');
-                return;
-            } else if (isEditMode) {
-                // If in edit mode, get path from input
-                path = pathInput.value.trim();
-                if (!path) {
-                    showNotification('Please enter a valid path', 'warning');
+            // Filter files using FileSystemManager
+            const filteredFiles = await FileSystemManager.filterRepoFiles(repoFiles);
+            
+            const included = [];
+            const ignored = [];
+            
+            // Read file contents
+            for (const fileData of filteredFiles) {
+                try {
+                    const content = await FileSystemManager.readFileContent(fileData.file);
+                    included.push({
+                        path: fileData.path,
+                        content: content
+                    });
+                } catch (error) {
+                    console.warn(`Failed to read ${fileData.path}:`, error);
+                }
+            }
+            
+            // Find ignored files
+            const allRepoFiles = window.selectedDirectoryFiles.filter(f => 
+                f.path.startsWith(repo.path + '/')
+            );
+            
+            for (const fileData of allRepoFiles) {
+                if (!filteredFiles.includes(fileData)) {
+                    ignored.push(fileData.path);
+                }
+            }
+            
+            return {
+                name: repo.name,
+                path: repo.path,
+                included: included,
+                ignored: ignored
+            };
+        }
+        
+        // Client-side repository scanning
+        async function scanRepositoriesClient() {
+            try {
+                pathLoading.classList.remove('hidden');
+                pathLoading.querySelector('p').textContent = 'Selecting directory...';
+                
+                // Use FileSystemManager to select directory
+                const result = await FileSystemManager.selectDirectory();
+                
+                // Store the selected files globally
+                window.selectedDirectoryFiles = result.files;
+                window.selectedDirectoryHandle = result.directoryHandle;
+                
+                // Update UI to show selected path
+                const dirName = result.directoryHandle ? result.directoryHandle.name : 'Selected Folder';
+                selectedPathDisplay.textContent = `📂 ${dirName}`;
+                customPath.classList.remove('hidden');
+                
+                pathLoading.querySelector('p').textContent = 'Scanning for repositories...';
+                
+                // Find repositories client-side
+                const repos = FileSystemManager.findGitRepositories(result.files);
+                
+                if (repos.length === 0) {
+                    showNotification('No Git repositories found in the selected directory.', 'warning');
+                    pathLoading.classList.add('hidden');
                     return;
                 }
                 
-                // Exit edit mode after getting the path
-                exitEditMode();
+                // Process the found repositories
+                handleScanComplete({ repos: repos });
                 
-                // Check if path exists in dropdown, if not, add it
-                let pathExists = false;
-                Array.from(pathSelect.options).forEach(option => {
-                    if (option.value === path) {
-                        option.selected = true;
-                        pathExists = true;
-                    }
-                });
-                
-                if (!pathExists) {
-                    const newOption = document.createElement('option');
-                    newOption.value = path;
-                    newOption.textContent = path;
-                    newOption.selected = true;
-                    pathSelect.appendChild(newOption);
+            } catch (error) {
+                pathLoading.classList.add('hidden');
+                if (error.message.includes('cancelled')) {
+                    showNotification('Directory selection cancelled.', 'info');
+                } else {
+                    showNotification('Error selecting directory: ' + error.message, 'error');
                 }
-            } else {
-                // Use the path from the dropdown
-                path = pathSelect.value;
             }
-            
-            if (!path) {
-                showNotification('Please select a valid path', 'error');
-                return;
-            }
-            
-            pathLoading.classList.remove('hidden');
-            pathLoading.querySelector('p').textContent = 'Scanning for repositories...';
-            
-            // Send the path to scan to the server
-            socket.emit('scan_repos', { path: path });
         }
         
         // Handle directory selection via browser's file dialog
@@ -790,6 +830,22 @@
             }
         }
         
+        // Handle scan completion
+        function handleScanComplete(data) {
+            pathLoading.classList.add('hidden');
+            
+            if (data.repos && data.repos.length > 0) {
+                // Store the repositories but don't automatically proceed
+                availableRepos = data.repos;
+                
+                // Show success message and continue button
+                showNotification(`Found ${data.repos.length} repositories. Click Continue to select them.`, 'success');
+                document.getElementById('proceed-to-step2').classList.remove('hidden');
+            } else {
+                showNotification('No repositories found in the selected directory.', 'warning');
+            }
+        }
+        
         // Modified function to load selected repositories
         function loadSelectedRepositories() {
             if (selectedRepoIds.length === 0) {
@@ -820,6 +876,9 @@
                         if (repo.files && repo.files.size > 0) {
                             // Process files directly in the browser
                             processRepositoryFiles(repo, (processedRepo) => {
+                                // Store directory handle for file writing
+                                processedRepo.directoryHandle = window.selectedDirectoryHandle;
+                                
                                 // Add to selected repos
                                 selectedRepos.push(processedRepo);
                                 
@@ -841,41 +900,30 @@
                         }
                         // If we don't have files (when using dropdown path)
                         else {
-                            // Use the server API
-                            axios.post('/api/repo-files', { repoPath: repo.path })
-                                .then(response => {
-                                    // Create repository object with data
-                                    const loadedRepo = {
-                                        name: repo.name,
-                                        path: repo.path,
-                                        included: response.data.included,
-                                        ignored: response.data.ignored
-                                    };
-                                    
-                                    // Add to selected repos
-                                    selectedRepos.push(loadedRepo);
-                                    
-                                    // Convert the repository's included files into a hierarchical tree structure
-                                    const repoTreeData = buildFileTree(loadedRepo.included, loadedRepo.name, false);
-                                    fileTreeData.push(repoTreeData);
-                                    
-                                    // Convert the repository's ignored files into a hierarchical tree structure
-                                    const repoIgnoredTreeData = buildFileTree(
-                                        loadedRepo.ignored.map(path => ({ path, content: "" })), 
-                                        loadedRepo.name, 
-                                        true
-                                    );
-                                    ignoredTreeData.push(repoIgnoredTreeData);
-                                    
-                                    // Track completion
-                                    loadedCount++;
-                                    finishLoading();
-                                })
-                                .catch(error => {
-                                    loadedCount++;
-                                    showNotification(`Error loading repository ${repo.name}: ${error.message}`, 'error');
-                                    finishLoading();
-                                });
+                            // Process files client-side
+                            processRepositoryFilesClient(repo).then(processedRepo => {
+                                // Add to selected repos
+                                selectedRepos.push(processedRepo);
+                                
+                                // Convert the repository's included files into trees
+                                const repoTreeData = buildFileTree(processedRepo.included, processedRepo.name, false);
+                                fileTreeData.push(repoTreeData);
+                                
+                                const repoIgnoredTreeData = buildFileTree(
+                                    processedRepo.ignored.map(path => ({ path, content: "" })), 
+                                    processedRepo.name, 
+                                    true
+                                );
+                                ignoredTreeData.push(repoIgnoredTreeData);
+                                
+                                // Track completion
+                                loadedCount++;
+                                finishLoading();
+                            }).catch(error => {
+                                loadedCount++;
+                                showNotification(`Error loading repository ${repo.name}: ${error.message}`, 'error');
+                                finishLoading();
+                            });
                         }
                     } catch (error) {
                         loadedCount++;
@@ -3509,21 +3557,9 @@
                     return;
                 }
                 
-                // Make API call to copy to clipboard
-                const response = await fetch('/api/copy-to-clipboard', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ selectedRepos: selectedFilesData })
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                showNotification(result.message, 'success');
+                // Use universal clipboard manager
+                const message = await ClipboardManager.copyRepositories(selectedFilesData);
+                showNotification(message, 'success');
             } catch (error) {
                 console.error('Error copying to clipboard:', error);
                 showNotification('Error copying to clipboard: ' + error.message, 'error');
@@ -3794,8 +3830,8 @@
         
         // Refresh repository files
         function refreshRepositoryFiles() {
-            if (selectedRepos.length === 0) {
-                showNotification('No repositories to refresh', 'warning');
+            if (!window.selectedDirectoryFiles || selectedRepos.length === 0) {
+                showNotification('No repositories to refresh. Please select a directory first.', 'warning');
                 return;
             }
             
@@ -3818,12 +3854,64 @@
             const fileTreeScrollTop = fileTree.scrollTop;
             const ignoredTreeScrollTop = ignoredFileTree.scrollTop;
             
-            // First, map all file paths to their current selection state for direct comparison
-            const fileSelectionMap = {};
-            const ignoredSelectionMap = {};
-            
-            // Save selection state for included files
-            if (fileTreeData && fileTreeData.length > 0) {
+            // Since we're client-side, just re-process the files
+            setTimeout(() => {
+                try {
+                    // Re-process the repository files
+                    selectedRepos.forEach((repo, index) => {
+                        if (repo.files) {
+                            // Re-process files directly in the browser
+                            processRepositoryFiles(repo, (processedRepo) => {
+                                selectedRepos[index] = processedRepo;
+                            });
+                        }
+                    });
+                    
+                    // Rebuild file trees
+                    fileTreeData = [];
+                    ignoredTreeData = [];
+                    
+                    selectedRepos.forEach(repo => {
+                        const repoTreeData = buildFileTree(repo.included, repo.name, false);
+                        fileTreeData.push(repoTreeData);
+                        
+                        const repoIgnoredTreeData = buildFileTree(
+                            repo.ignored.map(path => ({ path, content: "" })), 
+                            repo.name, 
+                            true
+                        );
+                        ignoredTreeData.push(repoIgnoredTreeData);
+                    });
+                    
+                    // Re-render trees
+                    renderFileTree();
+                    updateFileSummary();
+                    
+                    // Remove loading indicator
+                    loadingIndicator.remove();
+                    
+                    // Re-enable buttons
+                    refreshButton.disabled = false;
+                    copyButton.disabled = false;
+                    
+                    // Restore scroll positions
+                    fileTree.scrollTop = fileTreeScrollTop;
+                    ignoredFileTree.scrollTop = ignoredTreeScrollTop;
+                    
+                    showNotification('Repository files refreshed successfully!', 'success');
+                    
+                } catch (error) {
+                    loadingIndicator.remove();
+                    refreshButton.disabled = false;
+                    copyButton.disabled = false;
+                    showNotification('Error refreshing files: ' + error.message, 'error');
+                }
+            }, 100);
+        }
+        
+        // Helper function to collect file selections
+        function collectFileSelections(node, selectionMap) {
+            if (node.type === 'file') {
                 fileTreeData.forEach(repo => {
                     collectFileSelections(repo, fileSelectionMap);
                 });
@@ -4094,6 +4182,9 @@
             parseBtn.textContent = 'Preview Changes';
             
             if (data.success) {
+                // Store parsed changes for apply
+                window.lastParsedXMLChanges = data.changes;
+                
                 renderPreview(data.changes);
                 
                 changeCountEl.textContent = `${data.changeCount} changes`;
@@ -4115,29 +4206,6 @@
             showNotification(data.message, 'error');
         });
         
-        socket.on('xml_apply_start', (data) => {
-            applyBtn.disabled = true;
-            applyBtn.textContent = 'Applying...';
-        });
-        
-        socket.on('xml_apply_complete', (data) => {
-            applyBtn.disabled = false;
-            applyBtn.textContent = 'Apply Changes';
-            
-            if (data.success) {
-                renderResults(data.results);
-                
-                successCountEl.textContent = data.successfulChanges;
-                totalCountEl.textContent = data.totalChanges;
-                resultsContainer.classList.remove('hidden');
-                
-                if (data.successfulChanges === data.totalChanges) {
-                    showNotification('All changes applied successfully!', 'success');
-                } else {
-                    showNotification(`${data.successfulChanges} of ${data.totalChanges} changes applied successfully.`, 'warning');
-                }
-            }
-        });
         
         // Setup XML Parser functionality
         function setupXmlParser() {
@@ -4286,7 +4354,7 @@
         }
         
         // Apply XML changes
-        function applyXML() {
+        async function applyXML() {
             if (!xmlSelectedRepository) {
                 showNotification('Please select a repository first', 'warning');
                 return;
@@ -4298,11 +4366,231 @@
                 return;
             }
             
-            // Emit socket event
-            socket.emit('xml_apply', { 
-                xml: xml, 
-                repoPath: xmlSelectedRepository.path 
-            });
+            // Apply changes client-side using the parsed changes from preview
+            const changes = window.lastParsedXMLChanges;
+            if (!changes || changes.length === 0) {
+                showNotification('Please preview changes first', 'warning');
+                return;
+            }
+            
+            applyBtn.disabled = true;
+            applyBtn.textContent = 'Applying...';
+            
+            try {
+                const results = await applyXMLChangesClientSide(changes);
+                
+                // Clean up .identifier files if they exist - try immediately and with delay
+                await cleanupIdentifierFile();
+                
+                // Additional cleanup with delay to catch files created after operations
+                setTimeout(async () => {
+                    await cleanupIdentifierFile();
+                }, 500);
+                
+                setTimeout(async () => {
+                    await cleanupIdentifierFile();
+                }, 2000);
+                
+                // Render results
+                renderResults(results);
+                const successCount = results.filter(r => r.success).length;
+                successCountEl.textContent = successCount;
+                totalCountEl.textContent = results.length;
+                resultsContainer.classList.remove('hidden');
+                
+                if (successCount === results.length) {
+                    showNotification('All changes applied successfully to your local files!', 'success');
+                } else {
+                    showNotification(`${successCount} of ${results.length} changes applied successfully.`, 'warning');
+                }
+                
+            } catch (error) {
+                showNotification('Error applying changes: ' + error.message, 'error');
+            } finally {
+                applyBtn.disabled = false;
+                applyBtn.textContent = 'Apply Changes';
+            }
+        }
+        
+        // Apply XML changes to client-side files
+        async function applyXMLChangesClientSide(changes) {
+            const results = [];
+            
+            for (const change of changes) {
+                const result = {
+                    operation: change.operation,
+                    path: change.path,
+                    success: false,
+                    error: null,
+                    message: ''
+                };
+                
+                try {
+                    // Find the file in the selected repository
+                    const repoFiles = xmlSelectedRepository.files || [];
+                    const targetFile = repoFiles.find(fileData => {
+                        const filePath = fileData.path;
+                        const repoPath = xmlSelectedRepository.path;
+                        
+                        // Remove repo path prefix and match
+                        const relativePath = change.path.startsWith(repoPath + '/') 
+                            ? change.path.substring(repoPath.length + 1)
+                            : change.path;
+                            
+                        return filePath.endsWith(relativePath) || filePath.includes('/' + relativePath);
+                    });
+                    
+                    if (change.operation === 'MODIFY' && change.search) {
+                        // Handle search and replace
+                        if (!targetFile) {
+                            throw new Error(`File not found: ${change.path}`);
+                        }
+                        
+                        const originalContent = await FileSystemManager.readFileContent(targetFile.file);
+                        
+                        if (!originalContent.includes(change.search)) {
+                            throw new Error(`Search pattern not found in file: ${change.path}`);
+                        }
+                        
+                        const newContent = originalContent.replace(change.search, change.content);
+                        
+                        // Write directly to user's file system
+                        await writeFileToUserDirectory(change.path, newContent);
+                        
+                        result.success = true;
+                        result.message = `File modified in your local directory: ${change.path}`;
+                        
+                    } else if (change.operation === 'CREATE') {
+                        await writeFileToUserDirectory(change.path, change.content);
+                        result.success = true;
+                        result.message = `New file created in your local directory: ${change.path}`;
+                        
+                    } else if (change.operation === 'UPDATE') {
+                        await writeFileToUserDirectory(change.path, change.content);
+                        result.success = true;
+                        result.message = `File updated in your local directory: ${change.path}`;
+                        
+                    } else {
+                        throw new Error(`Unsupported operation: ${change.operation}`);
+                    }
+                    
+                } catch (error) {
+                    result.error = error.message;
+                    result.message = `Failed: ${error.message}`;
+                }
+                
+                results.push(result);
+            }
+            
+            return results;
+        }
+        
+        // Clean up Zone.Identifier files created by File System Access API
+        async function cleanupIdentifierFile() {
+            const directoryHandle = getDirectoryHandleForRepo();
+            
+            if (!directoryHandle) {
+                return; // No directory handle, nothing to clean
+            }
+            
+            try {
+                // Find all Zone.Identifier files in the directory
+                const filesToClean = [];
+                
+                for await (const [name, handle] of directoryHandle.entries()) {
+                    if (handle.kind === 'file') {
+                        // Match ANY identifier pattern - be very aggressive
+                        if (name.includes('Identifier') || 
+                            name.includes('identifier') || 
+                            name.includes(':Zone.') || 
+                            name.endsWith(':Zone.Identifier') || 
+                            name === '.identifier' ||
+                            name.match(/.*:Zone\.Identifier$/)) {
+                            filesToClean.push(name);
+                        }
+                    }
+                }
+                
+                // Remove each Zone.Identifier file found
+                for (const fileName of filesToClean) {
+                    try {
+                        await directoryHandle.removeEntry(fileName, { recursive: false });
+                    } catch (error) {
+                        // Silently ignore errors - file might already be deleted
+                    }
+                }
+                
+            } catch (error) {
+                // Silently ignore cleanup errors
+            }
+        }
+        
+        // Write file directly to user's directory using File System Access API
+        async function writeFileToUserDirectory(filePath, content) {
+            // For local repo, we need to get the directory handle from the selected repos
+            const directoryHandle = getDirectoryHandleForRepo();
+            
+            if (!directoryHandle) {
+                throw new Error('No directory selected or File System Access API not supported');
+            }
+            
+            try {
+                // Navigate to the correct subdirectory if needed
+                let currentDir = directoryHandle;
+                const pathParts = filePath.split('/');
+                const fileName = pathParts.pop(); // Remove filename, keep directory parts
+                
+                // Navigate through directory structure
+                for (const dirName of pathParts) {
+                    if (dirName) { // Skip empty parts
+                        try {
+                            currentDir = await currentDir.getDirectoryHandle(dirName, { create: true });
+                        } catch (error) {
+                            throw new Error(`Failed to create/access directory "${dirName}": ${error.message}`);
+                        }
+                    }
+                }
+                
+                // Create or get the file handle
+                const fileHandle = await currentDir.getFileHandle(fileName, { create: true });
+                
+                // Create a writable stream and write the content
+                const writableStream = await fileHandle.createWritable();
+                await writableStream.write(content);
+                await writableStream.close();
+                
+                return true;
+            } catch (error) {
+                // If File System Access API fails, provide helpful error
+                if (error.name === 'NotAllowedError') {
+                    throw new Error('Permission denied. Please grant file system access.');
+                } else if (error.name === 'SecurityError') {
+                    throw new Error('Security error. File System Access API requires HTTPS.');
+                }
+                throw error;
+            }
+        }
+        
+        // Get directory handle for the selected repository
+        function getDirectoryHandleForRepo() {
+            // Check if we have the global directory handle from file selection
+            if (window.selectedDirectoryHandle) {
+                return window.selectedDirectoryHandle;
+            }
+            
+            // Check if we have it stored in the selected repository
+            if (xmlSelectedRepository && xmlSelectedRepository.directoryHandle) {
+                return xmlSelectedRepository.directoryHandle;
+            }
+            
+            // Check if we have it in the loaded repositories
+            for (const repo of loadedRepositories) {
+                if (repo.name === xmlSelectedRepository?.name && repo.directoryHandle) {
+                    return repo.directoryHandle;
+                }
+            }
+            
+            return null;
         }
         
         // Render preview of XML changes
@@ -4334,11 +4622,53 @@
                 header.appendChild(path);
                 changeItem.appendChild(header);
                 
-                // Add status message
-                const status = document.createElement('div');
-                status.className = 'file-status';
-                status.textContent = change.status;
-                changeItem.appendChild(status);
+                // Add description if present
+                if (change.description) {
+                    const description = document.createElement('div');
+                    description.className = 'file-status';
+                    description.textContent = change.description;
+                    changeItem.appendChild(description);
+                }
+                
+                // Add search pattern if present
+                if (change.search) {
+                    const searchSection = document.createElement('div');
+                    searchSection.className = 'file-status';
+                    searchSection.innerHTML = '<strong>Search for:</strong>';
+                    changeItem.appendChild(searchSection);
+                    
+                    const searchContent = document.createElement('pre');
+                    searchContent.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                    searchContent.style.padding = '8px';
+                    searchContent.style.marginTop = '4px';
+                    searchContent.style.borderRadius = '4px';
+                    searchContent.style.fontSize = '13px';
+                    searchContent.style.whiteSpace = 'pre-wrap';
+                    searchContent.textContent = change.search;
+                    changeItem.appendChild(searchContent);
+                    
+                    const replaceSection = document.createElement('div');
+                    replaceSection.className = 'file-status';
+                    replaceSection.innerHTML = '<strong>Replace with:</strong>';
+                    replaceSection.style.marginTop = '8px';
+                    changeItem.appendChild(replaceSection);
+                    
+                    const replaceContent = document.createElement('pre');
+                    replaceContent.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+                    replaceContent.style.padding = '8px';
+                    replaceContent.style.marginTop = '4px';
+                    replaceContent.style.borderRadius = '4px';
+                    replaceContent.style.fontSize = '13px';
+                    replaceContent.style.whiteSpace = 'pre-wrap';
+                    replaceContent.textContent = change.content || change.code || '';
+                    changeItem.appendChild(replaceContent);
+                } else {
+                    // Add status message for simple operations
+                    const status = document.createElement('div');
+                    status.className = 'file-status';
+                    status.textContent = change.status;
+                    changeItem.appendChild(status);
+                }
                 
                 // Add warning if present
                 if (change.warning) {
@@ -4400,41 +4730,16 @@
         }
         
         // Event listeners
-        scanButton.addEventListener('click', scanRepositories);
-        browseButton.addEventListener('click', () => {
-            // If in edit mode, exit
-            if (isEditMode) {
-                exitEditMode();
-            }
-            
-            // Show loading indicator immediately when browse button is clicked
-            pathLoading.classList.remove('hidden');
-            pathLoading.querySelector('p').textContent = 'Waiting for directory selection...';
-            
-            // Set a flag to track if we're waiting for file selection
-            window.waitingForFileSelection = true;
-            
-            // Trigger the hidden file input
-            directoryInput.click();
-            
-            // Add a one-time focus event to detect when dialog is closed
-            window.addEventListener('focus', function onFocus() {
-                // Short delay to allow for handleDirectorySelection to fire first if a selection was made
-                setTimeout(() => {
-                    // If we're still waiting and custom path is still hidden, user likely canceled
-                    if (window.waitingForFileSelection && customPath.classList.contains('hidden')) {
-                        pathLoading.classList.add('hidden');
-                        window.waitingForFileSelection = false;
-                    }
-                }, 300);
-                
-                // Remove this listener after it fires once
-                window.removeEventListener('focus', onFocus);
-            });
-        });
+        scanButton.addEventListener('click', scanRepositoriesClient);
+        browseButton.addEventListener('click', scanRepositoriesClient);
         directoryInput.addEventListener('change', handleDirectorySelection);
         loadReposButton.addEventListener('click', loadSelectedRepositories);
         backToPathButton.addEventListener('click', backToPathSelection);
+        document.getElementById('continue-button').addEventListener('click', function() {
+            // Hide the continue button and proceed to step 2
+            document.getElementById('proceed-to-step2').classList.add('hidden');
+            processFoundRepositories(availableRepos, 'Selected Directory');
+        });
         copyButton.addEventListener('click', copyToClipboard);
         refreshButton.addEventListener('click', refreshRepositoryFiles);
         backToSelectButton.addEventListener('click', backToRepoSelect);
@@ -4583,8 +4888,8 @@
             }
         });
         
-        // Load paths on page load
-        loadPaths();
+        // Initialize client-side file selection on page load
+        initializeClientFileSelection();
         
         // Add event listener for page load to restore selection state
         window.addEventListener('load', function() {

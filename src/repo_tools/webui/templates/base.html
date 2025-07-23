@@ -8,6 +8,342 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    
+    <!-- File System Access API Manager -->
+    <script>
+        // Global file handling system for client-side file operations
+        window.FileSystemManager = {
+            // Check browser support
+            isSupported: function() {
+                return 'showDirectoryPicker' in window;
+            },
+            
+            getBrowserSupport: function() {
+                if ('showDirectoryPicker' in window) {
+                    return 'full';
+                } else if ('webkitdirectory' in HTMLInputElement.prototype) {
+                    return 'partial';
+                } else {
+                    return 'none';
+                }
+            },
+            
+            // Directory selection with fallback
+            selectDirectory: async function() {
+                const support = this.getBrowserSupport();
+                
+                if (support === 'full') {
+                    try {
+                        const dirHandle = await window.showDirectoryPicker({
+                            mode: 'readwrite'
+                        });
+                        return await this.processDirectoryHandle(dirHandle);
+                    } catch (error) {
+                        if (error.name === 'AbortError') {
+                            throw new Error('Directory selection cancelled');
+                        }
+                        throw error;
+                    }
+                } else if (support === 'partial') {
+                    return await this.fallbackDirectorySelect();
+                } else {
+                    throw new Error('Directory selection not supported in this browser');
+                }
+            },
+            
+            // Fallback for browsers without File System Access API
+            fallbackDirectorySelect: async function() {
+                return new Promise((resolve, reject) => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.webkitdirectory = true;
+                    input.multiple = true;
+                    input.style.display = 'none';
+                    
+                    input.onchange = (e) => {
+                        const files = Array.from(e.target.files);
+                        if (files.length > 0) {
+                            resolve(this.processFileList(files));
+                        } else {
+                            reject(new Error('No files selected'));
+                        }
+                        document.body.removeChild(input);
+                    };
+                    
+                    input.oncancel = () => {
+                        reject(new Error('Directory selection cancelled'));
+                        document.body.removeChild(input);
+                    };
+                    
+                    document.body.appendChild(input);
+                    input.click();
+                });
+            },
+            
+            // Process directory handle from File System Access API
+            processDirectoryHandle: async function(dirHandle) {
+                const files = [];
+                const repos = [];
+                
+                async function* getFilesRecursively(entry, path = '') {
+                    if (entry.kind === 'file') {
+                        const file = await entry.getFile();
+                        yield {path: path + entry.name, file, handle: entry};
+                    } else if (entry.kind === 'directory') {
+                        const newPath = path + entry.name + '/';
+                        if (entry.name === '.git') {
+                            repos.push(path);
+                        }
+                        for await (const handle of entry.values()) {
+                            yield* getFilesRecursively(handle, newPath);
+                        }
+                    }
+                }
+                
+                for await (const fileData of getFilesRecursively(dirHandle, '')) {
+                    files.push(fileData);
+                }
+                
+                return {
+                    files,
+                    repos: this.extractReposFromPaths(repos),
+                    directoryHandle: dirHandle
+                };
+            },
+            
+            // Process file list from webkitdirectory
+            processFileList: function(fileList) {
+                const files = [];
+                const repos = new Set();
+                
+                fileList.forEach(file => {
+                    const path = file.webkitRelativePath || file.name;
+                    files.push({
+                        path: path,
+                        file: file
+                    });
+                    
+                    // Check for .git directory
+                    if (path.includes('/.git/')) {
+                        const repoPath = path.substring(0, path.indexOf('/.git/'));
+                        repos.add(repoPath);
+                    }
+                });
+                
+                return {
+                    files,
+                    repos: this.extractReposFromPaths(Array.from(repos))
+                };
+            },
+            
+            // Extract repository information from paths
+            extractReposFromPaths: function(repoPaths) {
+                return repoPaths.map(path => ({
+                    name: path.split('/').pop() || 'unnamed',
+                    path: path,
+                    files: []
+                }));
+            },
+            
+            // Find Git repositories in files
+            findGitRepositories: function(files) {
+                const repos = new Map();
+                
+                files.forEach(fileData => {
+                    const path = fileData.path;
+                    if (path.includes('/.git/')) {
+                        const repoPath = path.substring(0, path.indexOf('/.git/'));
+                        if (!repos.has(repoPath)) {
+                            repos.set(repoPath, {
+                                name: repoPath.split('/').pop(),
+                                path: repoPath,
+                                files: []
+                            });
+                        }
+                        // Add file to repository (excluding .git directory contents)
+                        const relPath = path.substring(repoPath.length + 1);
+                        if (!relPath.startsWith('.git/')) {
+                            repos.get(repoPath).files.push(fileData);
+                        }
+                    }
+                });
+                
+                return Array.from(repos.values());
+            },
+            
+            // Read file content
+            readFileContent: async function(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e => resolve(e.target.result);
+                    reader.onerror = reject;
+                    reader.readAsText(file);
+                });
+            },
+            
+            // Filter repository files (match server-side logic)
+            filterRepoFiles: async function(files, options = {}) {
+                const {
+                    includeExtensions = null,
+                    excludeExtensions = [],
+                    maxFileSize = 10 * 1024 * 1024, // 10MB
+                    followGitignore = true
+                } = options;
+                
+                // Common files to ignore
+                const commonIgnores = [
+                    /node_modules\//,
+                    /\.git\//,
+                    /\.vscode\//,
+                    /\.idea\//,
+                    /__pycache__\//,
+                    /\.pyc$/,
+                    /\.pyo$/,
+                    /\.DS_Store$/,
+                    /Thumbs\.db$/,
+                    /\.identifier$/  // File System Access API permission tracking file
+                ];
+                
+                const filtered = [];
+                
+                for (const fileData of files) {
+                    const path = fileData.path;
+                    const file = fileData.file;
+                    
+                    // Skip if file is too large
+                    if (file.size > maxFileSize) continue;
+                    
+                    // Skip common ignores
+                    if (commonIgnores.some(regex => regex.test(path))) continue;
+                    
+                    // Check extensions
+                    const ext = path.split('.').pop().toLowerCase();
+                    if (includeExtensions && !includeExtensions.includes(ext)) continue;
+                    if (excludeExtensions.includes(ext)) continue;
+                    
+                    filtered.push(fileData);
+                }
+                
+                return filtered;
+            },
+            
+            // Check if file is binary
+            isBinaryFile: function(file) {
+                const binaryExtensions = [
+                    'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg',
+                    'mp3', 'mp4', 'avi', 'mov', 'wav',
+                    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+                    'zip', 'tar', 'gz', 'rar', '7z',
+                    'exe', 'dll', 'so', 'dylib',
+                    'bin', 'dat', 'db'
+                ];
+                
+                const ext = file.name.split('.').pop().toLowerCase();
+                return binaryExtensions.includes(ext) || 
+                       file.type.startsWith('image/') || 
+                       file.type.startsWith('video/') || 
+                       file.type.startsWith('audio/');
+            }
+        };
+        
+        // Universal clipboard function for all tools
+        window.ClipboardManager = {
+            // Copy text to clipboard
+            async copyText(text) {
+                try {
+                    if (navigator.clipboard && window.isSecureContext) {
+                        await navigator.clipboard.writeText(text);
+                        return true;
+                    } else {
+                        // Fallback for older browsers
+                        const textArea = document.createElement('textarea');
+                        textArea.value = text;
+                        textArea.style.position = 'fixed';
+                        textArea.style.opacity = '0';
+                        document.body.appendChild(textArea);
+                        textArea.select();
+                        const success = document.execCommand('copy');
+                        document.body.removeChild(textArea);
+                        return success;
+                    }
+                } catch (error) {
+                    console.error('Clipboard error:', error);
+                    return false;
+                }
+            },
+            
+            // Format repository content for clipboard
+            formatRepositoryContent(repositories) {
+                let formattedContent = "";
+                
+                // Add file tree structure
+                formattedContent += "FILE TREE STRUCTURE:\\n";
+                formattedContent += "=" + "=".repeat(79) + "\\n\\n";
+                
+                let totalFiles = 0;
+                
+                for (const repo of repositories) {
+                    const files = repo.files || repo.included || [];
+                    const selectedFiles = files.filter(f => f.selected !== false);
+                    totalFiles += selectedFiles.length;
+                    
+                    formattedContent += `${repo.name}\\n`;
+                    formattedContent += `${selectedFiles.length} files\\n\\n`;
+                    
+                    // Build simple tree structure
+                    for (const file of selectedFiles) {
+                        formattedContent += `├── ${file.path}\\n`;
+                    }
+                    formattedContent += "\\n";
+                }
+                
+                formattedContent += "=" + "=".repeat(79) + "\\n\\n";
+                
+                // Add file contents
+                for (const repo of repositories) {
+                    formattedContent += `REPOSITORY: ${repo.name}\\n`;
+                    formattedContent += "=" + "=".repeat(79) + "\\n\\n";
+                    
+                    const files = repo.files || repo.included || [];
+                    for (const file of files) {
+                        if (file.selected !== false) {
+                            formattedContent += `${file.path}:\\n${file.content || ''}\\n\\n`;
+                        }
+                    }
+                }
+                
+                return formattedContent;
+            },
+            
+            // Copy repositories to clipboard
+            async copyRepositories(repositories) {
+                const content = this.formatRepositoryContent(repositories);
+                const success = await this.copyText(content);
+                
+                if (success) {
+                    const totalFiles = repositories.reduce((sum, repo) => {
+                        const files = repo.files || repo.included || [];
+                        return sum + files.filter(f => f.selected !== false).length;
+                    }, 0);
+                    return `Copied ${totalFiles} files from ${repositories.length} repositories to clipboard`;
+                } else {
+                    throw new Error('Failed to copy to clipboard');
+                }
+            }
+        };
+        
+        // Browser compatibility warning
+        document.addEventListener('DOMContentLoaded', function() {
+            const support = window.FileSystemManager.getBrowserSupport();
+            
+            if (support === 'none') {
+                console.warn('File directory selection is not supported in this browser. Please use Chrome, Edge, or a compatible browser for full functionality.');
+            } else if (support === 'partial') {
+                console.info('Using legacy directory selection. For best experience, please use Chrome or Edge.');
+            }
+        });
+    </script>
+    
     {% block extra_head %}{% endblock %}
 </head>
 <body>

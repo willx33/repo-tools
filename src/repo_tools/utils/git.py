@@ -102,6 +102,9 @@ def parse_gitignore(repo_path: Path) -> pathspec.PathSpec:
         "third-party/",
         "external/",
         "deps/",
+        
+        # Browser File System Access API files
+        ".identifier",  # Permission tracking file created by browsers
     ])
 
     # Find all .gitignore files using rglob

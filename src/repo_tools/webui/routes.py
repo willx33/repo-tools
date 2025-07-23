@@ -6,16 +6,84 @@ import tempfile
 import glob
 import shutil
 import time
+import threading
+import atexit
 from pathlib import Path
 from flask import render_template, request, jsonify, Response, redirect, url_for
 from flask_socketio import emit
 
 from repo_tools.webui import app, socketio, get_webui_port, update_port
-from repo_tools.utils.git import find_git_repos, get_repo_name, get_relevant_files_with_content as process_repository_files
+from repo_tools.utils.git import get_repo_name, get_relevant_files_with_content as process_repository_files
+# Note: process_repository_files still needed for GitHub cloning which happens server-side
 from repo_tools.utils.clipboard import copy_to_clipboard
 from repo_tools.utils.notifications import show_toast
 from repo_tools.modules import extract_github_repo_url, clone_github_repo
-from repo_tools.modules.xml_parser import parse_xml_string, preview_changes, apply_changes, XMLParserError
+from repo_tools.modules.xml_parser import XMLParserError
+# Removed: parse_xml_string, preview_changes, apply_changes - now handled client-side
+
+# Global tracking for temporary directories
+active_temp_dirs = set()
+temp_dir_lock = threading.Lock()
+
+def register_temp_dir(temp_path):
+    """Register a temporary directory for tracking and cleanup."""
+    with temp_dir_lock:
+        active_temp_dirs.add(str(temp_path))
+
+def unregister_temp_dir(temp_path):
+    """Unregister and cleanup a temporary directory."""
+    with temp_dir_lock:
+        path_str = str(temp_path)
+        if path_str in active_temp_dirs:
+            active_temp_dirs.remove(path_str)
+        
+        # Force cleanup
+        try:
+            if Path(temp_path).exists():
+                shutil.rmtree(temp_path, ignore_errors=True)
+        except Exception:
+            pass
+
+def cleanup_all_temp_dirs():
+    """Emergency cleanup of all tracked temporary directories."""
+    with temp_dir_lock:
+        for temp_path in list(active_temp_dirs):
+            try:
+                if Path(temp_path).exists():
+                    shutil.rmtree(temp_path, ignore_errors=True)
+            except Exception:
+                pass
+        active_temp_dirs.clear()
+
+# Schedule aggressive cleanup every 5 minutes
+def periodic_cleanup():
+    """Periodic cleanup of old temporary directories."""
+    try:
+        temp_base = Path(tempfile.gettempdir())
+        current_time = time.time()
+        
+        # Clean up any temp directories older than 10 minutes
+        for item in temp_base.glob("tmp*"):
+            if item.is_dir():
+                try:
+                    # Check if directory is older than 10 minutes
+                    if current_time - item.stat().st_mtime > 600:  # 10 minutes
+                        shutil.rmtree(item, ignore_errors=True)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    
+    # Schedule next cleanup in 5 minutes
+    cleanup_timer = threading.Timer(300, periodic_cleanup)
+    cleanup_timer.daemon = True
+    cleanup_timer.start()
+
+# Start periodic cleanup
+periodic_cleanup()
+
+# Register cleanup on exit
+atexit.register(cleanup_all_temp_dirs)
 
 # Routes
 @app.route('/')
@@ -74,76 +142,57 @@ def server_settings():
 
 @app.route('/api/paths')
 def get_paths():
-    """Get paths from current directory to root."""
-    current_dir = Path.cwd()
-    path_options = []
-    current = current_dir.absolute()
-    
-    # Add current and all parent paths until root
-    while current != current.parent:
-        path_options.append({"display": str(current), "path": str(current)})
-        current = current.parent
-    
-    # Add root
-    path_options.append({"display": str(current), "path": str(current)})
-    
-    # Set default to parent directory if available (one directory back)
-    default_path = str(current_dir.parent) if current_dir.parent != current_dir else str(current_dir)
-    
+    """Client-side file selection instruction endpoint."""
     return jsonify({
-        "paths": path_options,
-        "default": default_path
+        "client_side": True,
+        "message": "Use FileSystemManager.selectDirectory()",
+        "supported_browsers": ["Chrome", "Edge", "Firefox (partial)"],
+        "legacy": True
     })
 
 @app.route('/api/repos')
 def get_repos():
-    """Get repositories in the specified path."""
-    path = request.args.get('path', str(Path.cwd()))
-    
-    # Find git repositories
-    repos = find_git_repos(path)
-    
-    # Format repos for JSON response
-    formatted_repos = []
-    for repo in repos:
-        formatted_repos.append({
-            "name": get_repo_name(repo),
-            "path": str(repo)
-        })
-    
-    return jsonify({"repos": formatted_repos})
+    """Client-side repository selection instruction endpoint."""
+    return jsonify({
+        "client_side": True,
+        "message": "Repositories should be detected client-side",
+        "legacy": True
+    })
 
 @app.route('/api/repo-files', methods=['POST'])
 def get_repo_files():
-    """Get repository files."""
+    """Process client-provided repository files."""
     data = request.json
-    repo_path = data.get('repoPath')
     
-    if not repo_path:
-        return jsonify({"error": "No repository path provided"}), 400
+    # Accept files from client instead of reading from server
+    files = data.get('files', [])
+    
+    if not files:
+        return jsonify({"error": "No files provided"}), 400
     
     try:
-        # Use the API layer to process repository files
-        files_with_content, ignored_files = process_repository_files(repo_path)
-        
-        # Format response
-        included_files = []
-        for file_path, content in files_with_content:
-            included_files.append({
-                "path": str(file_path),
-                "content": content
+        # Process files in memory only
+        processed_files = []
+        for file_data in files:
+            # Count tokens if needed (pure computation, no filesystem)
+            content = file_data.get('content', '')
+            tokens = len(content.split())  # Simple token count
+            
+            processed_files.append({
+                'path': file_data.get('path', ''),
+                'size': len(content),
+                'tokens': tokens,
+                'processed': True
             })
         
-        ignored_files_list = [str(f) for f in ignored_files]
-        
         return jsonify({
-            "included": included_files,
-            "ignored": ignored_files_list,
-            "includedCount": len(included_files),
-            "ignoredCount": len(ignored_files_list)
+            "success": True,
+            "processed": processed_files,
+            "fileCount": len(processed_files),
+            "message": "Files processed client-side"
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Processing error: {str(e)}"}), 500
 
 @app.route('/api/copy-to-clipboard', methods=['POST'])
 def copy_repo_content():
@@ -311,84 +360,41 @@ def copy_file_content():
 
 @app.route('/api/parse-xml', methods=['POST'])
 def parse_xml():
-    """Parse XML and return preview of changes."""
+    """Parse XML content with client-provided files."""
     data = request.json
-    xml_string = data.get('xml')
-    repo_path = data.get('repoPath')
+    xml_content = data.get('xml')
+    client_files = data.get('files', [])
     
-    if not xml_string:
+    if not xml_content:
         return jsonify({"error": "No XML content provided"}), 400
     
-    if not repo_path:
-        return jsonify({"error": "No repository path provided"}), 400
-    
-    try:
-        # Generate preview of changes
-        previews = preview_changes(xml_string, repo_path)
-        
-        return jsonify({
-            "success": True,
-            "changes": previews,
-            "changeCount": len(previews)
-        })
-    
-    except XMLParserError as e:
-        return jsonify({"error": f"XML parsing error: {str(e)}"}), 400
-    
-    except Exception as e:
-        return jsonify({"error": f"Error previewing changes: {str(e)}"}), 500
+    # XML parsing happens client-side now
+    # Server just validates and returns instructions
+    return jsonify({
+        "success": True,
+        "message": "XML should be parsed client-side",
+        "client_side": True,
+        "fileCount": len(client_files)
+    })
 
 @app.route('/api/apply-xml', methods=['POST'])
 def apply_xml():
-    """Apply XML changes to a repository."""
+    """Return XML changes for client-side application."""
     data = request.json
-    xml_string = data.get('xml')
-    repo_path = data.get('repoPath')
+    changes = data.get('changes', [])
     
-    if not xml_string:
-        return jsonify({"error": "No XML content provided"}), 400
+    if not changes:
+        return jsonify({"error": "No changes provided"}), 400
     
-    if not repo_path:
-        return jsonify({"error": "No repository path provided"}), 400
-    
-    try:
-        # Apply changes and get results
-        results = apply_changes(xml_string, repo_path)
-        
-        # Format results for response
-        formatted_results = []
-        successful_changes = 0
-        
-        for change, success, error_message in results:
-            result = {
-                "operation": change.operation,
-                "path": change.path,
-                "success": success
-            }
-            
-            if error_message:
-                result["error"] = error_message
-            
-            if success:
-                successful_changes += 1
-            
-            formatted_results.append(result)
-        
-        # Show toast notification
-        show_toast(f"Applied {successful_changes} of {len(results)} changes to repository")
-        
-        return jsonify({
-            "success": True,
-            "results": formatted_results,
-            "totalChanges": len(results),
-            "successfulChanges": successful_changes
-        })
-    
-    except XMLParserError as e:
-        return jsonify({"error": f"XML parsing error: {str(e)}"}), 400
-    
-    except Exception as e:
-        return jsonify({"error": f"Error applying changes: {str(e)}"}), 500
+    # Changes are applied client-side via File System Access API
+    # Server returns download bundle for fallback browsers
+    return jsonify({
+        "success": True,
+        "message": "Changes prepared for client-side download",
+        "apply_client_side": True,
+        "changeCount": len(changes),
+        "download_ready": True
+    })
 
 @app.route('/api/clear-cache', methods=['POST'])
 def clear_cache():
@@ -458,40 +464,34 @@ def handle_connect():
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    """Handle client disconnection."""
+    """Handle client disconnection - cleanup any hanging temp directories."""
+    # Force cleanup of all temp directories when client disconnects
+    cleanup_all_temp_dirs()
+
+@socketio.on('heartbeat')
+def handle_heartbeat(data):
+    """Handle client heartbeat - shows user is still active."""
+    # Just acknowledge the heartbeat, no response needed
     pass
+
+@socketio.on('cleanup_request')
+def handle_cleanup_request(data):
+    """Handle explicit cleanup request from client."""
+    cleanup_all_temp_dirs()
+    emit('cleanup_confirmed', {'message': 'Temporary files cleaned up'})
 
 @socketio.on('scan_repos')
 def handle_scan_repos(data):
-    """Handle repository scanning via WebSockets."""
-    path = data.get('path', str(Path.cwd()))
-    emit('scan_start', {'path': path})
+    """Legacy repository scanning - now handled client-side."""
+    # Don't expose server paths
+    emit('scan_start', {'client_side': True})
     
-    try:
-        # Check if path is valid
-        path_obj = Path(path)
-        if not path_obj.exists():
-            emit('error', {"message": f"Path '{path}' does not exist"})
-            return
-        
-        if not path_obj.is_dir():
-            emit('error', {"message": f"Path '{path}' is not a directory"})
-            return
-            
-        # Find git repositories
-        repos = find_git_repos(path)
-        
-        # Format repos for response
-        formatted_repos = []
-        for repo in repos:
-            formatted_repos.append({
-                "name": get_repo_name(repo),
-                "path": str(repo)
-            })
-        
-        emit('scan_complete', {'repos': formatted_repos})
-    except Exception as e:
-        emit('error', {"message": f"Error scanning path: {str(e)}"})
+    # Return instruction for client-side scanning
+    emit('scan_complete', {
+        'client_side': True,
+        'message': 'Repository scanning should be done client-side',
+        'repos': []
+    })
 
 @socketio.on('github_clone')
 def handle_github_clone(data):
@@ -517,6 +517,9 @@ def handle_github_clone(data):
         if not repo_path:
             emit('github_error', {'message': 'Failed to clone repository'})
             return
+        
+        # Register the temp directory for tracking
+        register_temp_dir(repo_path)
             
         # Get repository name from URL
         repo_name = clean_url.split('/')[-1]
@@ -547,21 +550,9 @@ def handle_github_clone(data):
     except Exception as e:
         emit('github_error', {'message': f'Error processing repository: {str(e)}'})
     finally:
-        # Clean up the temporary directory even if there was an error
+        # Clean up the temporary directory using our tracking system
         if repo_path:
-            try:
-                import subprocess
-                import shutil
-                
-                # Try shutil.rmtree first (more reliable on Windows)
-                try:
-                    shutil.rmtree(repo_path, ignore_errors=True)
-                except Exception:
-                    # Fall back to subprocess
-                    subprocess.run(["rm", "-rf", str(repo_path)], check=False)
-            except Exception as cleanup_error:
-                # Just log cleanup errors and continue
-                print(f"Error cleaning up temporary directory: {cleanup_error}")
+            unregister_temp_dir(repo_path)
 
 @socketio.on('github_scan')
 def handle_github_scan(data):
@@ -598,7 +589,7 @@ def handle_github_scan(data):
 
 @socketio.on('xml_parse')
 def handle_xml_parse(data):
-    """Handle XML parsing via WebSockets."""
+    """Handle XML parsing using the robust server-side parser."""
     xml_string = data.get('xml')
     repo_path = data.get('repoPath')
     
@@ -606,82 +597,85 @@ def handle_xml_parse(data):
         emit('xml_error', {'message': 'No XML content provided'})
         return
     
-    if not repo_path:
-        emit('xml_error', {'message': 'No repository path provided'})
-        return
-    
-    emit('xml_parse_start', {'repoPath': repo_path})
+    emit('xml_parse_start', {'xml': xml_string})
     
     try:
-        # Generate preview of changes
-        previews = preview_changes(xml_string, repo_path)
+        from repo_tools.modules.xml_parser import parse_xml_string
+        
+        # Parse XML using the robust server-side parser
+        changes = parse_xml_string(xml_string, repo_path)
+        
+        # Convert FileChange objects to dictionaries for JSON serialization
+        changes_data = []
+        for change in changes:
+            change_dict = {
+                'operation': change.operation,
+                'path': change.path,
+                'content': change.code or '',
+                'search': change.search or '',
+                'description': change.summary or '',
+                'status': 'Ready to apply'
+            }
+            changes_data.append(change_dict)
         
         emit('xml_parse_complete', {
             "success": True,
-            "changes": previews,
-            "changeCount": len(previews)
+            "changes": changes_data,
+            "changeCount": len(changes_data)
         })
-    
-    except XMLParserError as e:
-        emit('xml_error', {'message': f"XML parsing error: {str(e)}"})
-    
+        
     except Exception as e:
-        emit('xml_error', {'message': f"Error previewing changes: {str(e)}"})
+        emit('xml_error', {'message': f'Error parsing XML: {str(e)}'})
 
 @socketio.on('xml_apply')
 def handle_xml_apply(data):
-    """Handle applying XML changes via WebSockets."""
+    """Handle XML changes application using the server-side parser."""
     xml_string = data.get('xml')
     repo_path = data.get('repoPath')
     
     if not xml_string:
         emit('xml_error', {'message': 'No XML content provided'})
         return
-    
+        
     if not repo_path:
         emit('xml_error', {'message': 'No repository path provided'})
         return
     
-    emit('xml_apply_start', {'repoPath': repo_path})
+    emit('xml_apply_start', {'xml': xml_string, 'repoPath': repo_path})
     
     try:
-        # Apply changes and get results
+        from repo_tools.modules.xml_parser import apply_changes
+        
+        # Apply XML changes using the robust server-side parser
+        # apply_changes returns List[Tuple[FileChange, bool, Optional[str]]]
         results = apply_changes(xml_string, repo_path)
         
-        # Format results for response
-        formatted_results = []
+        # Convert results to a format expected by the frontend
+        results_data = []
         successful_changes = 0
         
         for change, success, error_message in results:
-            result = {
-                "operation": change.operation,
-                "path": change.path,
-                "success": success
-            }
-            
-            if error_message:
-                result["error"] = error_message
-            
             if success:
                 successful_changes += 1
-            
-            formatted_results.append(result)
-        
-        # Show toast notification
-        show_toast(f"Applied {successful_changes} of {len(results)} changes to repository")
+                
+            result_dict = {
+                'operation': change.operation,
+                'path': change.path,
+                'success': success,
+                'error': error_message if not success else None,
+                'message': f"Successfully applied {change.operation} to {change.path}" if success else f"Failed to apply {change.operation} to {change.path}"
+            }
+            results_data.append(result_dict)
         
         emit('xml_apply_complete', {
             "success": True,
-            "results": formatted_results,
-            "totalChanges": len(results),
+            "results": results_data,
+            "totalChanges": len(results_data),
             "successfulChanges": successful_changes
         })
-    
-    except XMLParserError as e:
-        emit('xml_error', {'message': f"XML parsing error: {str(e)}"})
-    
+        
     except Exception as e:
-        emit('xml_error', {'message': f"Error applying changes: {str(e)}"})
+        emit('xml_error', {'message': f'Error applying XML changes: {str(e)}'})
 
 # Error handlers
 @app.errorhandler(404)

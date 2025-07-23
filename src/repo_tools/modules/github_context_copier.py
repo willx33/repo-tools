@@ -56,7 +56,7 @@ def extract_github_repo_url(input_url: str) -> str:
 
 def clone_github_repo(repo_url: str) -> Path:
     """
-    Clone a GitHub repository to a temporary directory.
+    Clone a GitHub repository to a temporary directory with security restrictions.
     
     Args:
         repo_url: The GitHub repository URL
@@ -64,17 +64,45 @@ def clone_github_repo(repo_url: str) -> Path:
     Returns:
         Path to the cloned repository or None if clone failed
     """
+    import shutil
+    import time
+    import threading
+    
+    # Security limits
+    MAX_REPO_SIZE_MB = 50
+    MAX_CLONE_TIME_SECONDS = 120  # 2 minutes max
+    
     temp_dir = Path(tempfile.mkdtemp())
+    cleanup_scheduled = False
+    
+    def emergency_cleanup():
+        """Force cleanup of temp directory after timeout"""
+        nonlocal cleanup_scheduled
+        if not cleanup_scheduled:
+            cleanup_scheduled = True
+            try:
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    console.print(f"[yellow]Emergency cleanup: Removed {temp_dir}[/yellow]")
+            except Exception:
+                pass
+    
+    # Schedule emergency cleanup in case of timeout
+    cleanup_timer = threading.Timer(MAX_CLONE_TIME_SECONDS, emergency_cleanup)
+    cleanup_timer.start()
+    
     try:
         with Progress() as progress:
             task = progress.add_task("[green]Cloning repository...", total=None)
             
-            # Run git clone
+            # Run git clone with timeout and depth limit
+            start_time = time.time()
             result = subprocess.run(
-                ["git", "clone", "--depth", "1", repo_url, str(temp_dir)],
+                ["git", "clone", "--depth", "1", "--single-branch", repo_url, str(temp_dir)],
                 capture_output=True,
                 text=True,
-                check=False
+                check=False,
+                timeout=MAX_CLONE_TIME_SECONDS - 10  # Leave buffer for cleanup
             )
             
             progress.update(task, completed=True)
@@ -83,10 +111,43 @@ def clone_github_repo(repo_url: str) -> Path:
                 console.print(f"[bold red]Error cloning repository:[/bold red] {result.stderr}")
                 return None
             
+            # Check repository size
+            repo_size_mb = get_directory_size_mb(temp_dir)
+            if repo_size_mb > MAX_REPO_SIZE_MB:
+                console.print(f"[bold red]Repository too large:[/bold red] {repo_size_mb:.1f}MB (max: {MAX_REPO_SIZE_MB}MB)")
+                return None
+            
+            # Cancel the emergency cleanup timer since we succeeded
+            cleanup_timer.cancel()
+            console.print(f"[green]Repository cloned successfully:[/green] {repo_size_mb:.1f}MB")
             return temp_dir
+            
+    except subprocess.TimeoutExpired:
+        console.print(f"[bold red]Clone timeout:[/bold red] Repository took longer than {MAX_CLONE_TIME_SECONDS} seconds")
+        return None
     except Exception as e:
         console.print(f"[bold red]Error:[/bold red] {str(e)}")
         return None
+    finally:
+        # Ensure cleanup timer is cancelled
+        if cleanup_timer.is_alive():
+            cleanup_timer.cancel()
+
+
+def get_directory_size_mb(path: Path) -> float:
+    """Calculate directory size in megabytes."""
+    total_size = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(path):
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                try:
+                    total_size += os.path.getsize(filepath)
+                except (OSError, IOError):
+                    continue
+    except Exception:
+        return 0
+    return total_size / (1024 * 1024)
 
 
 def get_relevant_files_with_content(repo_path: Path):
