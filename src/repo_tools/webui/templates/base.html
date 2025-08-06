@@ -29,7 +29,7 @@
             },
             
             // Directory selection with fallback
-            selectDirectory: async function() {
+            selectDirectory: async function(options = {}) {
                 const support = this.getBrowserSupport();
                 
                 if (support === 'full') {
@@ -37,7 +37,7 @@
                         const dirHandle = await window.showDirectoryPicker({
                             mode: 'readwrite'
                         });
-                        return await this.processDirectoryHandle(dirHandle);
+                        return await this.processDirectoryHandle(dirHandle, options);
                     } catch (error) {
                         if (error.name === 'AbortError') {
                             throw new Error('Directory selection cancelled');
@@ -80,22 +80,164 @@
                 });
             },
             
-            // Process directory handle from File System Access API
-            processDirectoryHandle: async function(dirHandle) {
-                const files = [];
-                const repos = [];
+            // Process directory handle from File System Access API - OPTIMIZED VERSION
+            processDirectoryHandle: async function(dirHandle, options = {}) {
+                const { 
+                    onProgress = null,
+                    maxDepth = 5,
+                    quickScan = true 
+                } = options;
                 
-                async function* getFilesRecursively(entry, path = '') {
+                const files = [];
+                const repos = new Map();
+                const MAX_FILES_PER_BATCH = 100;
+                let fileCount = 0;
+                let repoCount = 0;
+                
+                // Optimized: Only scan for .git folders first if quickScan enabled
+                async function* scanForRepos(entry, path = '', depth = 0) {
+                    if (depth > maxDepth) return;
+                    
+                    if (entry.kind === 'directory') {
+                        // For the root directory, don't add its name to the path
+                        const newPath = (entry === dirHandle) ? '' : path + entry.name + '/';
+                        
+                        // Found a repository
+                        if (entry.name === '.git') {
+                            // The repository is the parent directory of .git
+                            // Remove the trailing slash from path to get the repo path
+                            const repoPath = path.slice(0, -1) || ''; // Empty string for root repository
+                            if (!repos.has(repoPath)) {
+                                // Extract just the repo name from the path
+                                const pathParts = repoPath.split('/').filter(p => p);
+                                const repoName = pathParts.length > 0 ? pathParts[pathParts.length - 1] : dirHandle.name;
+                                
+                                repos.set(repoPath, {
+                                    name: repoName,
+                                    path: repoPath, // Store the path relative to selected directory
+                                    files: [],
+                                    handle: entry
+                                });
+                                repoCount++;
+                                
+                                if (onProgress) {
+                                    onProgress({
+                                        type: 'repo_found',
+                                        count: repoCount,
+                                        path: repoPath
+                                    });
+                                }
+                            }
+                            
+                            // Skip scanning inside .git directory
+                            return;
+                        }
+                        
+                        // Skip common non-repo directories to speed up scanning
+                        const skipDirs = ['node_modules', '__pycache__', '.cache', 'dist', 'build', '.next'];
+                        if (skipDirs.includes(entry.name)) {
+                            return;
+                        }
+                        
+                        // Process subdirectories in parallel batches
+                        const handles = [];
+                        for await (const handle of entry.values()) {
+                            handles.push({ handle, path: newPath });
+                            
+                            // Process in batches
+                            if (handles.length >= 10) {
+                                await Promise.all(
+                                    handles.map(({ handle, path }) => 
+                                        scanForRepos(handle, path, depth + 1).next()
+                                    )
+                                );
+                                handles.length = 0;
+                            }
+                        }
+                        
+                        // Process remaining handles
+                        if (handles.length > 0) {
+                            for (const { handle, path } of handles) {
+                                yield* scanForRepos(handle, path, depth + 1);
+                            }
+                        }
+                    }
+                }
+                
+                // Quick scan: Just find repos, don't enumerate all files
+                if (quickScan) {
+                    // First check if the root itself is a repository
+                    try {
+                        await dirHandle.getDirectoryHandle('.git');
+                        // Root is a repository
+                        repos.set('', {
+                            name: dirHandle.name,
+                            path: '',
+                            files: []
+                        });
+                        repoCount++;
+                        if (onProgress) {
+                            onProgress({
+                                type: 'repo_found',
+                                count: repoCount,
+                                path: ''
+                            });
+                        }
+                    } catch (e) {
+                        // Root is not a repository, continue scanning
+                    }
+                    
+                    // Scan subdirectories for repos
+                    for await (const handle of dirHandle.values()) {
+                        if (handle.kind === 'directory') {
+                            for await (const _ of scanForRepos(handle, '', 0)) {
+                                // Just iterating to trigger the scan
+                            }
+                        }
+                    }
+                    
+                    return {
+                        files: [], // Don't return files in quick scan
+                        repos: Array.from(repos.values()),
+                        directoryHandle: dirHandle,
+                        quickScan: true
+                    };
+                }
+                
+                // Full scan: Get all files (original behavior)
+                async function* getFilesRecursively(entry, path = '', depth = 0) {
+                    if (depth > maxDepth) return;
+                    
                     if (entry.kind === 'file') {
                         const file = await entry.getFile();
                         yield {path: path + entry.name, file, handle: entry};
+                        fileCount++;
+                        
+                        if (onProgress && fileCount % MAX_FILES_PER_BATCH === 0) {
+                            onProgress({
+                                type: 'files_scanned',
+                                count: fileCount
+                            });
+                        }
                     } else if (entry.kind === 'directory') {
                         const newPath = path + entry.name + '/';
                         if (entry.name === '.git') {
-                            repos.push(path);
+                            const repoPath = path.slice(0, -1);
+                            if (!repos.has(repoPath)) {
+                                repos.set(repoPath, {
+                                    name: repoPath.split('/').pop() || dirHandle.name,
+                                    path: repoPath,
+                                    files: []
+                                });
+                            }
                         }
-                        for await (const handle of entry.values()) {
-                            yield* getFilesRecursively(handle, newPath);
+                        
+                        // Skip common large directories
+                        const skipDirs = ['node_modules', '__pycache__', '.cache'];
+                        if (!skipDirs.includes(entry.name)) {
+                            for await (const handle of entry.values()) {
+                                yield* getFilesRecursively(handle, newPath, depth + 1);
+                            }
                         }
                     }
                 }
@@ -106,8 +248,9 @@
                 
                 return {
                     files,
-                    repos: this.extractReposFromPaths(repos),
-                    directoryHandle: dirHandle
+                    repos: Array.from(repos.values()),
+                    directoryHandle: dirHandle,
+                    quickScan: false
                 };
             },
             

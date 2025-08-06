@@ -623,7 +623,13 @@
         
         // Process repository files client-side
         async function processRepositoryFilesClient(repo) {
-            // Get files for this repository from the global selected files
+            // Check if we're in quick scan mode
+            if (window.quickScanMode && window.selectedDirectoryHandle) {
+                // In quick scan mode, we need to scan the specific repo on-demand
+                return await processRepositoryFilesQuickScan(repo);
+            }
+            
+            // Original implementation for full scan mode
             const repoFiles = window.selectedDirectoryFiles.filter(fileData => 
                 fileData.path.startsWith(repo.path + '/')
             );
@@ -666,28 +672,242 @@
             };
         }
         
+        // Process repository files in quick scan mode - scan on-demand
+        async function processRepositoryFilesQuickScan(repo) {
+            const included = [];
+            const ignored = [];
+            let fileCount = 0;
+            
+            try {
+                // Navigate to the repository directory
+                let currentHandle = window.selectedDirectoryHandle;
+                
+                // If repo.path is empty, the repository is at the root
+                if (!repo.path || repo.path === '' || repo.path === '.') {
+                    // Repository is at the root of selected directory
+                    // currentHandle is already set correctly
+                } else {
+                    // Navigate through subdirectories
+                    let pathToUse = repo.path;
+                    
+                    // Remove any leading/trailing slashes
+                    pathToUse = pathToUse.replace(/^\/+|\/+$/g, '');
+                    
+                    const pathParts = pathToUse.split('/').filter(p => p && p !== '.');
+                    
+                    for (const part of pathParts) {
+                        try {
+                            currentHandle = await currentHandle.getDirectoryHandle(part);
+                        } catch (e) {
+                            console.error(`Could not navigate to "${part}" in path "${repo.path}":`, e);
+                            console.error('Current handle:', currentHandle);
+                            console.error('Path parts:', pathParts);
+                            throw new Error(`Could not access repository: ${repo.path}`);
+                        }
+                    }
+                }
+                
+                // Scan files in this repository only - OPTIMIZED
+                async function* getRepoFiles(dirHandle, path = '', depth = 0) {
+                    // Limit depth to prevent excessive recursion
+                    if (depth > 10) return;
+                    
+                    // Batch process directory entries
+                    const entries = [];
+                    for await (const entry of dirHandle.values()) {
+                        entries.push({ entry, path });
+                    }
+                    
+                    // Process files first (they're faster)
+                    const files = entries.filter(e => e.entry.kind === 'file');
+                    const dirs = entries.filter(e => e.entry.kind === 'directory');
+                    
+                    // Yield files in batches
+                    for (const { entry, path: parentPath } of files) {
+                        try {
+                            const file = await entry.getFile();
+                            
+                            // Skip large files (>10MB) and binary files
+                            if (file.size > 10 * 1024 * 1024) continue;
+                            
+                            // Skip common binary/non-text files
+                            const skipExtensions = ['.exe', '.dll', '.so', '.dylib', '.pyc', '.pyo', '.class', 
+                                                   '.jar', '.zip', '.tar', '.gz', '.rar', '.7z', '.bin', 
+                                                   '.img', '.iso', '.dmg', '.pkg', '.deb', '.rpm',
+                                                   '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.svg',
+                                                   '.mp3', '.mp4', '.avi', '.mov', '.wmv', '.flv',
+                                                   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                                                   '.db', '.sqlite', '.lock', '.log'];
+                            
+                            const fileName = entry.name.toLowerCase();
+                            if (skipExtensions.some(ext => fileName.endsWith(ext))) continue;
+                            
+                            // Skip symlinks that might cause issues
+                            if (fileName.startsWith('.') && fileName !== '.gitignore' && fileName !== '.env') continue;
+                            
+                            yield { path: parentPath + entry.name, file, handle: entry };
+                            fileCount++;
+                            
+                            // Update progress every 25 files (more frequent updates)
+                            if (fileCount % 25 === 0) {
+                                const progressMsg = document.querySelector('#processing-indicator p');
+                                if (progressMsg) {
+                                    progressMsg.textContent = `Scanning ${repo.name}... (${fileCount} files found)`;
+                                }
+                            }
+                        } catch (error) {
+                            // Skip files that can't be read (permissions, symlinks, etc.)
+                            console.debug(`Skipping file ${entry.name}: ${error.message}`);
+                        }
+                    }
+                    
+                    // Process directories (skip common ones)
+                    const skipDirs = ['node_modules', '.git', '__pycache__', 'dist', 'build', '.next', 
+                                     'coverage', '.cache', 'tmp', 'temp', '.idea', '.vscode',
+                                     'venv', 'env', '.env', 'virtualenv', '.virtualenv',
+                                     'bower_components', 'vendor', 'packages', '.nuxt',
+                                     'out', 'output', '.output', 'artifacts', 'target'];
+                    
+                    for (const { entry, path: parentPath } of dirs) {
+                        if (!skipDirs.includes(entry.name)) {
+                            const newPath = parentPath + entry.name + '/';
+                            yield* getRepoFiles(entry, newPath, depth + 1);
+                        }
+                    }
+                }
+                
+                const repoFiles = [];
+                for await (const fileData of getRepoFiles(currentHandle, '')) {
+                    repoFiles.push(fileData);
+                }
+                
+                // Filter files
+                const filteredFiles = await FileSystemManager.filterRepoFiles(repoFiles);
+                
+                // Read file contents with OPTIMIZED parallel batch processing
+                const BATCH_SIZE = 20; // Increased batch size for better parallelism
+                const MAX_CONCURRENT = 5; // Max concurrent file reads
+                let processedCount = 0;
+                
+                // Create a queue for processing files
+                const processQueue = async (files, batchSize) => {
+                    const results = [];
+                    const executing = [];
+                    
+                    for (const fileData of files) {
+                        const promise = (async () => {
+                            try {
+                                // Check if file is text-like before reading
+                                if (fileData.file.size === 0) {
+                                    return null; // Skip empty files
+                                }
+                                
+                                const content = await FileSystemManager.readFileContent(fileData.file);
+                                processedCount++;
+                                
+                                // Update progress more frequently
+                                if (processedCount % 10 === 0) {
+                                    const progressMsg = document.querySelector('#processing-indicator p');
+                                    if (progressMsg) {
+                                        const percent = Math.round(processedCount / files.length * 100);
+                                        progressMsg.textContent = `Reading ${repo.name} files... (${percent}% - ${processedCount}/${files.length} files)`;
+                                    }
+                                }
+                                
+                                return {
+                                    path: repo.path ? repo.path + '/' + fileData.path : fileData.path,
+                                    content: content
+                                };
+                            } catch (error) {
+                                console.debug(`Skipped ${fileData.path}: ${error.message}`);
+                                processedCount++;
+                                return null;
+                            }
+                        })();
+                        
+                        results.push(promise);
+                        
+                        if (files.length >= batchSize) {
+                            executing.push(promise);
+                            
+                            if (executing.length >= MAX_CONCURRENT) {
+                                await Promise.race(executing);
+                                executing.splice(executing.findIndex(p => p === promise), 1);
+                            }
+                        }
+                    }
+                    
+                    const fileResults = await Promise.all(results);
+                    return fileResults.filter(r => r !== null);
+                };
+                
+                // Process files with the optimized queue
+                const progressMsg = document.querySelector('#processing-indicator p');
+                if (progressMsg) {
+                    progressMsg.textContent = `Reading ${repo.name} files... (0%)`;
+                }
+                
+                const fileContents = await processQueue(filteredFiles, BATCH_SIZE);
+                included.push(...fileContents);
+                
+                // Track ignored files
+                for (const fileData of repoFiles) {
+                    if (!filteredFiles.includes(fileData)) {
+                        ignored.push(repo.path + '/' + fileData.path);
+                    }
+                }
+                
+            } catch (error) {
+                console.error('Error processing repository:', error);
+                showNotification(`Error processing ${repo.name}: ${error.message}`, 'error');
+            }
+            
+            return {
+                name: repo.name,
+                path: repo.path,
+                included: included,
+                ignored: ignored
+            };
+        }
+        
         // Client-side repository scanning
         async function scanRepositoriesClient() {
             try {
                 pathLoading.classList.remove('hidden');
                 pathLoading.querySelector('p').textContent = 'Selecting directory...';
                 
-                // Use FileSystemManager to select directory
-                const result = await FileSystemManager.selectDirectory();
+                let repoCountDisplay = 0;
                 
-                // Store the selected files globally
-                window.selectedDirectoryFiles = result.files;
+                // Progress callback for real-time updates
+                const onProgress = (progress) => {
+                    if (progress.type === 'repo_found') {
+                        repoCountDisplay = progress.count;
+                        pathLoading.querySelector('p').textContent = `Found ${repoCountDisplay} repositories... ${progress.path.split('/').pop()}`;
+                    } else if (progress.type === 'files_scanned') {
+                        pathLoading.querySelector('p').textContent = `Scanning files... (${progress.count} files processed)`;
+                    }
+                };
+                
+                // Use FileSystemManager to select directory with quickScan enabled
+                const result = await FileSystemManager.selectDirectory({
+                    quickScan: true,  // Enable quick scanning mode
+                    maxDepth: 5,      // Limit scanning depth
+                    onProgress: onProgress
+                });
+                
+                // Store the selected handle globally (files will be empty in quickScan mode)
                 window.selectedDirectoryHandle = result.directoryHandle;
+                window.quickScanMode = true;
                 
                 // Update UI to show selected path
                 const dirName = result.directoryHandle ? result.directoryHandle.name : 'Selected Folder';
                 selectedPathDisplay.textContent = `📂 ${dirName}`;
                 customPath.classList.remove('hidden');
                 
-                pathLoading.querySelector('p').textContent = 'Scanning for repositories...';
+                pathLoading.querySelector('p').textContent = 'Processing repositories...';
                 
-                // Find repositories client-side
-                const repos = FileSystemManager.findGitRepositories(result.files);
+                // Use the repos directly from the optimized scan
+                const repos = result.repos || [];
                 
                 if (repos.length === 0) {
                     showNotification('No Git repositories found in the selected directory.', 'warning');
@@ -696,6 +916,7 @@
                 }
                 
                 // Process the found repositories
+                showNotification(`Found ${repos.length} repositories in quick scan mode!`, 'success');
                 handleScanComplete({ repos: repos });
                 
             } catch (error) {
@@ -835,8 +1056,13 @@
             pathLoading.classList.add('hidden');
             
             if (data.repos && data.repos.length > 0) {
-                // Store the repositories but don't automatically proceed
-                availableRepos = data.repos;
+                // Store the repositories with proper IDs assigned
+                availableRepos = data.repos.map((repo, index) => ({
+                    id: `repo-${index}`,
+                    name: repo.name,
+                    path: repo.path,
+                    files: repo.files || []
+                }));
                 
                 // Show success message and continue button
                 showNotification(`Found ${data.repos.length} repositories. Click Continue to select them.`, 'success');
@@ -846,8 +1072,8 @@
             }
         }
         
-        // Modified function to load selected repositories
-        function loadSelectedRepositories() {
+        // OPTIMIZED function to load selected repositories in parallel
+        async function loadSelectedRepositories() {
             if (selectedRepoIds.length === 0) {
                 showNotification('Please select at least one repository', 'warning');
                 return;
@@ -858,111 +1084,105 @@
             
             // Show loading indicator
             repoLoading.classList.remove('hidden');
+            repoLoading.querySelector('p').textContent = `Loading ${selectedRepoIds.length} repositories...`;
             
-            // Keep track of loaded repositories
-            let loadedCount = 0;
+            // Reset data
             selectedRepos = [];
             fileTreeData = [];
             ignoredTreeData = [];
             
-            // For each selected repository
-            selectedRepoIds.forEach((repoId, index) => {
-                const repo = availableRepos.find(r => r.id === repoId);
-                if (!repo) return;
+            // Process repositories in parallel with a concurrency limit
+            const MAX_CONCURRENT_REPOS = 3;
+            const reposToProcess = selectedRepoIds.map(id => availableRepos.find(r => r.id === id)).filter(r => r);
+            
+            let processedCount = 0;
+            
+            // Process repos in batches
+            for (let i = 0; i < reposToProcess.length; i += MAX_CONCURRENT_REPOS) {
+                const batch = reposToProcess.slice(i, i + MAX_CONCURRENT_REPOS);
                 
-                setTimeout(() => {
+                // Update loading message
+                repoLoading.querySelector('p').textContent = `Loading repositories ${i + 1}-${Math.min(i + batch.length, reposToProcess.length)} of ${reposToProcess.length}...`;
+                
+                // Process batch in parallel
+                const batchPromises = batch.map(async (repo) => {
                     try {
-                        // If we have files from the browser (when using Browse for Path)
-                        if (repo.files && repo.files.size > 0) {
-                            // Process files directly in the browser
-                            processRepositoryFiles(repo, (processedRepo) => {
-                                // Store directory handle for file writing
-                                processedRepo.directoryHandle = window.selectedDirectoryHandle;
-                                
-                                // Add to selected repos
-                                selectedRepos.push(processedRepo);
-                                
-                                // Convert the repository's included files into trees
-                                const repoTreeData = buildFileTree(processedRepo.included, processedRepo.name, false);
-                                fileTreeData.push(repoTreeData);
-                                
-                                const repoIgnoredTreeData = buildFileTree(
-                                    processedRepo.ignored.map(path => ({ path, content: "" })), 
-                                    processedRepo.name, 
-                                    true
-                                );
-                                ignoredTreeData.push(repoIgnoredTreeData);
-                                
-                                // Track completion
-                                loadedCount++;
-                                finishLoading();
-                            });
-                        }
-                        // If we don't have files (when using dropdown path)
-                        else {
-                            // Process files client-side
-                            processRepositoryFilesClient(repo).then(processedRepo => {
-                                // Add to selected repos
-                                selectedRepos.push(processedRepo);
-                                
-                                // Convert the repository's included files into trees
-                                const repoTreeData = buildFileTree(processedRepo.included, processedRepo.name, false);
-                                fileTreeData.push(repoTreeData);
-                                
-                                const repoIgnoredTreeData = buildFileTree(
-                                    processedRepo.ignored.map(path => ({ path, content: "" })), 
-                                    processedRepo.name, 
-                                    true
-                                );
-                                ignoredTreeData.push(repoIgnoredTreeData);
-                                
-                                // Track completion
-                                loadedCount++;
-                                finishLoading();
-                            }).catch(error => {
-                                loadedCount++;
-                                showNotification(`Error loading repository ${repo.name}: ${error.message}`, 'error');
-                                finishLoading();
-                            });
+                        let processedRepo;
+                        
+                        // Process files client-side (works for both browse and quick scan modes)
+                        processedRepo = await processRepositoryFilesClient(repo);
+                        
+                        if (processedRepo) {
+                            // Store directory handle for file writing
+                            processedRepo.directoryHandle = window.selectedDirectoryHandle;
+                            
+                            // Convert the repository's included files into trees
+                            const repoTreeData = buildFileTree(processedRepo.included, processedRepo.name, false);
+                            const repoIgnoredTreeData = buildFileTree(
+                                processedRepo.ignored.map(path => ({ path, content: "" })), 
+                                processedRepo.name, 
+                                true
+                            );
+                            
+                            return {
+                                processedRepo,
+                                repoTreeData,
+                                repoIgnoredTreeData
+                            };
                         }
                     } catch (error) {
-                        loadedCount++;
-                        showNotification(`Error processing repository ${repo.name}: ${error.message}`, 'error');
-                        finishLoading();
+                        console.error(`Error processing repository ${repo.name}:`, error);
+                        showNotification(`Error loading ${repo.name}: ${error.message}`, 'error');
+                        return null;
                     }
-                }, index * 200); // Stagger processing
-            });
+                });
+                
+                // Wait for batch to complete
+                const batchResults = await Promise.all(batchPromises);
+                
+                // Process results
+                batchResults.forEach(result => {
+                    if (result) {
+                        selectedRepos.push(result.processedRepo);
+                        fileTreeData.push(result.repoTreeData);
+                        ignoredTreeData.push(result.repoIgnoredTreeData);
+                        processedCount++;
+                    }
+                });
+                
+                // Update progress
+                repoLoading.querySelector('p').textContent = `Processed ${processedCount} of ${reposToProcess.length} repositories...`;
+            }
             
-            // Function to finish loading when all repos are processed
-            function finishLoading() {
-                if (loadedCount === selectedRepoIds.length) {
-                    repoLoading.classList.add('hidden');
-                    
-                    if (selectedRepos.length > 0) {
-                        // Update UI with file summary
-                        updateFileSummary();
-                        
-                        // Render the file trees
-                        renderFileTree();
-                        
-                        // Show both the file summary step and create prompt step
-                        stepFileSummary.classList.remove('hidden');
-                        stepCreatePrompt.classList.remove('hidden');
-                        
-                        // Show the XML Parser step
-                        const stepXmlParser = document.getElementById('step-xml-parser');
-                        if (stepXmlParser) {
-                            stepXmlParser.classList.remove('hidden');
-                            setupXmlParser();
-                        }
-                        
-                        // Save initial selection state to localStorage
-                        saveSelectionState();
-                    } else {
-                        // Re-enable Step 2 if no repos were loaded
-                        stepRepoSelect.classList.remove('disabled');
-                    }
+            // All repos processed
+            repoLoading.classList.add('hidden');
+            
+            if (selectedRepos.length > 0) {
+                // Update UI with file summary
+                updateFileSummary();
+                
+                // Render the file trees
+                renderFileTree();
+                
+                // Show both the file summary step and create prompt step
+                stepFileSummary.classList.remove('hidden');
+                stepCreatePrompt.classList.remove('hidden');
+                
+                // Show the XML Parser step
+                const stepXmlParser = document.getElementById('step-xml-parser');
+                if (stepXmlParser) {
+                    stepXmlParser.classList.remove('hidden');
+                    setupXmlParser();
                 }
+                
+                // Save initial selection state to localStorage
+                saveSelectionState();
+                
+                showNotification(`Successfully loaded ${selectedRepos.length} repositories!`, 'success');
+            } else {
+                // Re-enable Step 2 if no repos were loaded
+                stepRepoSelect.classList.remove('disabled');
+                showNotification('No repositories could be loaded. Please try again.', 'error');
             }
         }
         
